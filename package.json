@@ -1,0 +1,26 @@
+{
+  "name": "ollama-forge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "All-in-one Ollama desktop management suite — monitoring, benchmarking, and Modelfile generation",
+  "workspaces": [
+    "packages/server",
+    "packages/dashboard"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:dashboard\"",
+    "dev:server": "npm run dev -w packages/server",
+    "dev:dashboard": "npm run dev -w packages/dashboard",
+    "build": "npm run build -w packages/server && npm run build -w packages/dashboard",
+    "start": "npm run start -w packages/server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "DjimIT B.V.",
+  "license": "MIT"
+}
