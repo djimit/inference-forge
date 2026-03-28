@@ -10,7 +10,7 @@ import { cpus, totalmem, freemem, platform } from 'os';
 
 const execAsync = promisify(exec);
 
-// ── Types ───────────────────────────────────────────────────────────
+// -- Types ----------------------------------------------------------
 
 export interface GpuInfo {
   index: number;
@@ -42,7 +42,7 @@ export interface HardwareSnapshot {
   totalGpuVramUsedMb: number;
 }
 
-// ── NVIDIA Detection ────────────────────────────────────────────────
+// -- NVIDIA Detection -----------------------------------------------
 
 async function detectNvidia(): Promise<GpuInfo[]> {
   try {
@@ -77,7 +77,7 @@ async function detectNvidia(): Promise<GpuInfo[]> {
   }
 }
 
-// ── AMD Detection ──────────────────────────────────────────────────
+// -- AMD Detection --------------------------------------------------
 
 async function detectAmd(): Promise<GpuInfo[]> {
   try {
@@ -144,7 +144,7 @@ async function detectAmd(): Promise<GpuInfo[]> {
   }
 }
 
-// ── Apple Silicon Detection ────────────────────────────────────────
+// -- Apple Silicon Detection ----------------------------------------
 
 async function detectAppleSilicon(): Promise<GpuInfo[]> {
   if (platform() !== 'darwin') return [];
@@ -188,7 +188,7 @@ async function detectAppleSilicon(): Promise<GpuInfo[]> {
   }
 }
 
-// ── System Info ────────────────────────────────────────────────────
+// -- System Info ----------------------------------------------------
 
 function getSystemInfo(): SystemInfo {
   const cpuInfo = cpus();
@@ -205,7 +205,7 @@ function getSystemInfo(): SystemInfo {
   };
 }
 
-// ── Main Detection ─────────────────────────────────────────────────
+// -- Main Detection -------------------------------------------------
 
 export class HardwareService {
   private lastSnapshot: HardwareSnapshot | null = null;

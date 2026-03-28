@@ -3,7 +3,7 @@
  * Typed client for all Ollama REST API endpoints used by Forge.
  */
 
-// ── Types ──────────────────────────────────────────────────────────
+// -- Types ----------------------------------------------------------
 
 export interface OllamaModel {
   name: string;
@@ -73,7 +73,7 @@ export interface GenerateResponse {
   eval_duration?: number;
 }
 
-// ── Client ─────────────────────────────────────────────────────────
+// -- Client ---------------------------------------------------------
 
 export class OllamaClient {
   private baseUrl: string;

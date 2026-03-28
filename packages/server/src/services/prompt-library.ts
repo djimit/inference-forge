@@ -33,7 +33,7 @@ export interface RunConfig {
   collectLogProbs: boolean;      // attempt perplexity measurement
 }
 
-// ── Built-in Prompt Sets ───────────────────────────────────────────
+// -- Built-in Prompt Sets -------------------------------------------
 
 const BUILTIN_SETS: PromptSet[] = [
   {
@@ -169,7 +169,7 @@ User: Now summarize all 20 topics concisely.`,
   },
 ];
 
-// ── Prompt Library Service ─────────────────────────────────────────
+// -- Prompt Library Service -----------------------------------------
 
 export class PromptLibrary {
   private sets: Map<string, PromptSet> = new Map();

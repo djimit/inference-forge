@@ -49,7 +49,7 @@ export interface BenchmarkSummary {
 
 type ProgressCallback = (message: string, progress: number) => void;
 
-// ── Standard benchmark prompts ─────────────────────────────────────
+// -- Standard benchmark prompts -------------------------------------
 
 export const STANDARD_PROMPTS: BenchmarkPrompt[] = [
   {
@@ -77,7 +77,7 @@ Be thorough and specific with technology choices and trade-offs.`,
   },
 ];
 
-// ── Benchmark Runner ───────────────────────────────────────────────
+// -- Benchmark Runner -----------------------------------------------
 
 export class BenchmarkService {
   private running = false;

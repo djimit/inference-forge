@@ -21,7 +21,7 @@ export interface ModelfileTemplate {
   rating: number;
 }
 
-// ── Community Templates ────────────────────────────────────────────
+// -- Community Templates --------------------------------------------
 
 const COMMUNITY_TEMPLATES: ModelfileTemplate[] = [
   {
@@ -180,7 +180,7 @@ Use sensory details and emotional depth. Avoid clichés.
   },
 ];
 
-// ── Library Service ────────────────────────────────────────────────
+// -- Library Service ------------------------------------------------
 
 export class ModelfileLibrary {
   private templates: Map<string, ModelfileTemplate> = new Map();

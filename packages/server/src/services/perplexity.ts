@@ -27,7 +27,7 @@ export interface PerplexityComparison {
   }>;
 }
 
-// ── Reference Corpora ──────────────────────────────────────────────
+// -- Reference Corpora ----------------------------------------------
 
 export const REFERENCE_CORPORA: Record<string, string> = {
   technical: `The transformer architecture uses multi-head self-attention mechanisms to process
@@ -75,7 +75,7 @@ our assumption that p and q have no common factors. Therefore the square root of
 be irrational.`,
 };
 
-// ── Perplexity Estimator ───────────────────────────────────────────
+// -- Perplexity Estimator -------------------------------------------
 
 export class PerplexityService {
   /**
@@ -107,7 +107,7 @@ export class PerplexityService {
       prompt: `Continue this text exactly as written:\n\n${prompt}`,
       stream: false,
       options: {
-        temperature: 0, // Deterministic for reproducibility
+        temperature: 0,  // Deterministic for reproducibility
         num_predict: words.length - midpoint + 20,
       },
     });
@@ -123,12 +123,12 @@ export class PerplexityService {
     const msPerPromptToken = (promptEvalDurationNs / 1_000_000) / promptEvalCount;
 
     // Estimate log probability from timing characteristics
-    // This is an approximation— true perplexity requires access to logits
+    // This is an approximation — true perplexity requires access to logits
     // We use the inverse relationship between generation speed and uncertainty
     const avgLogProb = -Math.log(msPerEvalToken / msPerPromptToken);
 
     // Convert to approximate perplexity
-    // PPL   exp(-avg_�log_prob)
+    // PPL ≈ exp(-avg_log_prob)
     const estimatedPerplexity = Math.exp(-avgLogProb);
 
     // Measure text similarity as additional quality signal
@@ -138,7 +138,7 @@ export class PerplexityService {
     );
 
     // Blend timing-based and similarity-based estimates
-    // Higher similarity  � lower perplexity (model reproduces known text better)
+    // Higher similarity → lower perplexity (model reproduces known text better)
     const adjustedPerplexity = estimatedPerplexity * (2 - similarity);
 
     return {

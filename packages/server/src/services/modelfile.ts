@@ -5,7 +5,7 @@
 
 import { ollama, type ModelInfo } from './ollama.js';
 
-// ── Types ──────────────────────────────────────────────────────────
+// -- Types ----------------------------------------------------------
 
 export interface HardwareProfile {
   gpuVramMb: number;       // GPU VRAM in MB (0 if CPU only)
@@ -34,7 +34,7 @@ export interface ModelfileOutput {
   maxContextTokens: number;
 }
 
-// ── KV Cache Type Recommendations ──────────────────────────────────
+// -- KV Cache Type Recommendations ----------------------------------
 
 const KV_CACHE_TYPES = {
   f16: { memoryMultiplier: 1.0, label: 'FP16 (default, highest quality)' },
@@ -42,7 +42,7 @@ const KV_CACHE_TYPES = {
   q4_0: { memoryMultiplier: 0.25, label: 'Q4_0 (quarter memory, some loss)' },
 } as const;
 
-// ── Use Case Templates ─────────────────────────────────────────────
+// -- Use Case Templates ---------------------------------------------
 
 const USE_CASE_DEFAULTS: Record<string, Partial<ModelfileConfig>> = {
   chat: {
@@ -82,7 +82,7 @@ const USE_CASE_DEFAULTS: Record<string, Partial<ModelfileConfig>> = {
   },
 };
 
-// ── Generator ──────────────────────────────────────────────────────
+// -- Generator ------------------------------------------------------
 
 export class ModelfileGenerator {
   /**

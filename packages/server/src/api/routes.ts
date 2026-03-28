@@ -17,7 +17,7 @@ import { orchestrator, type AgentConfig, type Workflow } from '../services/orche
 
 export const router = Router();
 
-// ▶ Health ◀ ▶ Health ◀ ▶ Health ◀ ▶ Health ◀
+// -- Health ---------------------------------------------------------
 
 router.get('/health', async (_req, res) => {
   const ollamaOnline = await ollama.ping();
@@ -30,7 +30,7 @@ router.get('/health', async (_req, res) => {
   });
 });
 
-// ▶ Models ◀ ▶ Models ◀ ▶ Models ◀ ▶ Models ◀
+// -- Models ---------------------------------------------------------
 
 router.get('/models', async (_req, res) => {
   try {
@@ -59,7 +59,7 @@ router.get('/models/:name/info', async (req, res) => {
   }
 });
 
-// ▶ Metrics ◀ ▶ Metrics ◀ ▶ Metrics ◀ ▶ Metrics ◀
+// -- Metrics --------------------------------------------------------
 
 router.get('/metrics', (_req, res) => {
   const metrics = monitor.getLastMetrics();
@@ -70,7 +70,7 @@ router.get('/metrics', (_req, res) => {
   res.json(metrics);
 });
 
-// ▶ v0.2: Hardware ◀ ▶ Hardware ◀ ▶ Hardware ◀
+// -- v0.2: Hardware -------------------------------------------------
 
 router.get('/hardware', async (_req, res) => {
   try {
@@ -90,7 +90,7 @@ router.get('/hardware/last', (_req, res) => {
   res.json(snapshot);
 });
 
-// ▶ v0.2: Throughput ◀ ▶ Throughput ◀ ▶ Throughput ◀
+// -- v0.2: Throughput -----------------------------------------------
 
 router.get('/throughput', (_req, res) => {
   res.json(throughput.getSnapshot());
@@ -101,7 +101,7 @@ router.get('/throughput/:model', (req, res) => {
   res.json({ model: req.params.model, samples: history });
 });
 
-// ▶ v0.2: Alerts ◀ ▶ Alerts ◀ ▶ Alerts ◀ ▶ Alerts ◀
+// -- v0.2: Alerts ---------------------------------------------------
 
 router.get('/alerts', (req, res) => {
   const limit = parseInt(req.query.limit as string, 10) || 50;
@@ -131,7 +131,7 @@ router.post('/alerts/acknowledge-all', (_req, res) => {
   res.json({ success: true });
 });
 
-// ▶ Benchmark ◀ ▶ Benchmark ◀ ▶ Benchmark ◀
+// -- Benchmark ------------------------------------------------------
 
 router.get('/benchmark/status', (_req, res) => {
   res.json({ running: benchmark.isRunning() });
@@ -210,7 +210,7 @@ router.get('/benchmark/export/:format', (req, res) => {
   }
 });
 
-// ▶ v0.3: Perplexity ◀ ▶ Perplexity ◀ ▶ Perplexity ◀
+// -- v0.3: Perplexity -----------------------------------------------
 
 router.post('/perplexity/estimate', async (req, res) => {
   const { model, kvCacheType, corpus } = req.body as {
@@ -252,7 +252,7 @@ router.post('/perplexity/compare', async (req, res) => {
   }
 });
 
-// ▶ v0.3: Prompt Library ◀ ▶ Prompt Library ◀
+// -- v0.3: Prompt Library -------------------------------------------
 
 router.get('/prompts', (_req, res) => {
   res.json({ sets: promptLibrary.getAll() });
@@ -286,7 +286,7 @@ router.get('/prompts/:id/export', (req, res) => {
   res.send(json);
 });
 
-// ▶ v0.4: Modelfile Library ◀ ▶ Modelfile Library ◀
+// -- v0.4: Modelfile Library ----------------------------------------
 
 router.get('/templates', (req, res) => {
   const query = req.query.q as string;
@@ -350,7 +350,7 @@ router.post('/templates/import', (req, res) => {
   }
 });
 
-// ▶ Modelfile Generator ◀ ▶ Modelfile Generator ◀
+// -- Modelfile Generator --------------------------------------------
 
 router.post('/modelfile/generate', async (req, res) => {
   const { hardware: hw, config } = req.body as {
@@ -371,7 +371,7 @@ router.post('/modelfile/generate', async (req, res) => {
   }
 });
 
-// ▶ v0.5: Agents ◀ ▶ Agents ◀ ▶ Agents ◀ ▶ Agents ◀
+// -- v0.5: Agents ---------------------------------------------------
 
 router.get('/agents', (_req, res) => {
   res.json({ agents: orchestrator.getAllAgents() });
@@ -399,7 +399,7 @@ router.delete('/agents/:id', (req, res) => {
   res.json({ success });
 });
 
-// ▶ v0.5: Sessions ◀ ▶ Sessions ◀ ▶ Sessions ◀
+// -- v0.5: Sessions -------------------------------------------------
 
 router.get('/sessions', (_req, res) => {
   res.json({ sessions: orchestrator.getAllSessions() });
@@ -436,7 +436,7 @@ router.delete('/sessions/:id', (req, res) => {
   res.json({ success });
 });
 
-// ▶ v0.5: Workflows ◀ ▶ Workflows ◀ ▶ Workflows ◀
+// -- v0.5: Workflows ------------------------------------------------
 
 router.get('/workflows', (_req, res) => {
   res.json({ workflows: orchestrator.getAllWorkflows() });
@@ -457,7 +457,7 @@ router.post('/workflows/:id/execute', async (req, res) => {
   }
 });
 
-// ▶ v0.5: Orchestrator Status ◀ ▶ Orchestrator Status ◀
+// -- v0.5: Orchestrator Status --------------------------------------
 
 router.get('/orchestrator/status', async (_req, res) => {
   try {

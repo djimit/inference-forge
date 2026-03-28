@@ -5,7 +5,7 @@
 
 import { ollama, type RunningModel } from './ollama.js';
 
-// ── Types ──────────────────────────────────────────────────────────
+// -- Types ----------------------------------------------------------
 
 export interface AgentConfig {
   id: string;
@@ -92,7 +92,7 @@ export interface OrchestratorStatus {
   queueDepth: number;
 }
 
-// ── Orchestrator ───────────────────────────────────────────────────
+// -- Orchestrator ---------------------------------------------------
 
 export class OrchestratorService {
   private agents: Map<string, AgentConfig> = new Map();
@@ -106,7 +106,7 @@ export class OrchestratorService {
   }> = [];
   private processing = false;
 
-  // ── Agent Management ───────────────────────────────────────────
+  // -- Agent Management -------------------------------------------
 
   registerAgent(config: AgentConfig): void {
     this.agents.set(config.id, config);
@@ -138,7 +138,7 @@ export class OrchestratorService {
     return true;
   }
 
-  // ── Session Management ─────────────────────────────────────────
+  // -- Session Management -----------------------------------------
 
   createSession(agentId: string): AgentSession {
     const agent = this.agents.get(agentId);
@@ -181,7 +181,7 @@ export class OrchestratorService {
     return this.sessions.delete(id);
   }
 
-  // ── Message Handling ───────────────────────────────────────────
+  // -- Message Handling -------------------------------------------
 
   async sendMessage(sessionId: string, content: string): Promise<string> {
     const session = this.sessions.get(sessionId);
@@ -247,7 +247,7 @@ export class OrchestratorService {
     }
   }
 
-  // ── Routing ────────────────────────────────────────────────────
+  // -- Routing ----------------------------------------------------
 
   routeMessage(content: string): AgentConfig | null {
     const allRules: Array<RoutingRule & { agent: AgentConfig }> = [];
@@ -288,7 +288,7 @@ export class OrchestratorService {
     return null;
   }
 
-  // ── Workflow Execution ─────────────────────────────────────────
+  // -- Workflow Execution -----------------------------------------
 
   registerWorkflow(workflow: Workflow): void {
     this.workflows.set(workflow.id, workflow);
@@ -369,7 +369,7 @@ export class OrchestratorService {
     return results;
   }
 
-  // ── Resource Allocation ────────────────────────────────────────
+  // -- Resource Allocation ----------------------------------------
 
   async getAllocations(): Promise<ResourceAllocation[]> {
     const running = await ollama.listRunning();
