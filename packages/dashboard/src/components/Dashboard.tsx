@@ -27,7 +27,7 @@ export function Dashboard() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="text-2xl font-bold">
-              <span className="text-forge-accent">Ollama</span>{' '}
+              <span className="text-forge-accent">Inference</span>{' '}
               <span className="text-forge-text">Forge</span>
             </div>
             <span className="text-xs bg-forge-accent/20 text-forge-accent px-2 py-0.5 rounded-full">

@@ -1,12 +1,12 @@
-# Ollama Forge — Architecture & Build Plan
+# Inference Forge — Architecture & Build Plan
 
 ## Project Overview
-**Ollama Forge** is an all-in-one desktop management suite for Ollama, built with Node.js + React. It provides real-time monitoring, KV cache benchmarking, and intelligent Modelfile generation.
+**Inference Forge** is an all-in-one desktop management suite for local LLM inference (currently supporting Ollama), built with Node.js + React. It provides real-time monitoring, KV cache benchmarking, and intelligent Modelfile generation.
 
 ## Architecture
 
 ```
-ollama-forge/
+inference-forge/
 ├── packages/
 │   ├── server/          # Express + WebSocket backend
 │   │   ├── src/

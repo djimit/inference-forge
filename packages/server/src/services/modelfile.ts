@@ -161,7 +161,7 @@ export class ModelfileGenerator {
     recommendations: string[]
   ): string {
     const lines: string[] = [
-      `# Ollama Forge — Auto-generated Modelfile`,
+      `# Inference Forge — Auto-generated Modelfile`,
       `# Model: ${config.customName}`,
       `# Use case: ${config.useCase}`,
       `# Generated: ${new Date().toISOString()}`,

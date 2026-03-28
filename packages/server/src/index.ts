@@ -1,5 +1,5 @@
 /**
- * Ollama Forge — Server Entry Point
+ * Inference Forge — Server Entry Point
  */
 
 import 'dotenv/config';
@@ -30,7 +30,7 @@ monitor.start();
 server.listen(PORT, () => {
   console.log(`
   ╔═══════════════════════════════════════╗
-  ║        Ollama Forge Server            ║
+  ║      Inference Forge Server           ║
   ║  http://localhost:${PORT}               ║
   ║  WebSocket: ws://localhost:${PORT}/ws    ║
   ╚═══════════════════════════════════════╝

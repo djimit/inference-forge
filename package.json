@@ -1,8 +1,8 @@
 {
-  "name": "ollama-forge",
+  "name": "inference-forge",
   "version": "0.1.0",
   "private": true,
-  "description": "All-in-one Ollama desktop management suite — monitoring, benchmarking, and Modelfile generation",
+  "description": "All-in-one local LLM inference management suite — monitoring, benchmarking, and Modelfile generation",
   "workspaces": [
     "packages/server",
     "packages/dashboard"
