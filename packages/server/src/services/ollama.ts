@@ -79,7 +79,14 @@ export class OllamaClient {
   private baseUrl: string;
 
   constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || process.env.OLLAMA_HOST || 'http://localhost:11434';
+    let url = baseUrl || process.env.OLLAMA_HOST || 'http://localhost:11434';
+    // Ensure protocol prefix — OLLAMA_HOST is often set without http://
+    if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `http://${url}`;
+    }
+    // Normalize 0.0.0.0 to localhost for fetch compatibility
+    url = url.replace('://0.0.0.0:', '://localhost:');
+    this.baseUrl = url;
   }
 
   private async fetch<T>(path: string, options?: RequestInit): Promise<T> {
