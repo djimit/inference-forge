@@ -1,37 +1,56 @@
 /**
  * Smart Modelfile Generator
  * Generates optimized Ollama Modelfiles based on hardware specs and model characteristics.
+ * Enhanced with flash-moe methodology: hardware-aware GPU offload, thread count, batch size.
  */
 
-import { ollama, type ModelInfo } from './ollama.js';
+import { ollama, parseModelArch, type ModelInfo, type ModelArchInfo } from './ollama.js';
 
 // -- Types ----------------------------------------------------------
 
 export interface HardwareProfile {
-  gpuVramMb: number;       // GPU VRAM in MB (0 if CPU only)
-  systemRamMb: number;     // Total system RAM in MB
-  gpuName: string;         // GPU model name
-  cpuCores: number;        // Number of CPU cores
+  gpuVramMb: number;
+  systemRamMb: number;
+  gpuName: string;
+  cpuCores: number;
+  cpuPhysicalCores: number;
+  pcieGeneration: number | null;
+  pcieBandwidthGBs: number | null;
 }
 
 export interface ModelfileConfig {
-  baseModel: string;       // e.g. "llama3.2:latest"
-  customName: string;      // name for the custom model
+  baseModel: string;
+  customName: string;
   useCase: 'chat' | 'coding' | 'analysis' | 'creative' | 'agent';
-  maxContextTokens?: number;  // override auto-calculated
-  kvCacheType?: string;       // override auto-recommended
+  maxContextTokens?: number;
+  kvCacheType?: string;
   systemPrompt?: string;
   temperature?: number;
   topP?: number;
   topK?: number;
   repeatPenalty?: number;
+  numGpu?: number;
+  numThread?: number;
+  numBatch?: number;
+}
+
+export interface Recommendation {
+  parameter: string;
+  value: string | number;
+  rationale: string;
+  impact: 'performance' | 'memory' | 'quality';
 }
 
 export interface ModelfileOutput {
-  content: string;         // The Modelfile text
-  recommendations: string[];  // Explanatory notes
-  estimatedVramMb: number;    // Expected VRAM usage
+  content: string;
+  recommendations: Recommendation[];
+  estimatedVramMb: number;
   maxContextTokens: number;
+  numGpu: number;
+  numThread: number;
+  numBatch: number;
+  splitRatio: string;
+  storageAdvice: string;
 }
 
 // -- KV Cache Type Recommendations ----------------------------------
@@ -85,56 +104,97 @@ const USE_CASE_DEFAULTS: Record<string, Partial<ModelfileConfig>> = {
 // -- Generator ------------------------------------------------------
 
 export class ModelfileGenerator {
-  /**
-   * Generate an optimized Modelfile based on hardware and use case.
-   */
   async generate(
     hardware: HardwareProfile,
     config: ModelfileConfig
   ): Promise<ModelfileOutput> {
-    const recommendations: string[] = [];
+    const recommendations: Recommendation[] = [];
 
     // Get model info for sizing calculations
     let modelInfo: ModelInfo | null = null;
+    let archInfo: ModelArchInfo | null = null;
     try {
       modelInfo = await ollama.showModel(config.baseModel);
+      archInfo = parseModelArch(modelInfo);
     } catch {
-      recommendations.push(
-        `Could not fetch model info for ${config.baseModel}. Using defaults.`
-      );
+      recommendations.push({
+        parameter: 'info',
+        value: 'fallback',
+        rationale: `Could not fetch model info for ${config.baseModel}. Using heuristic estimates.`,
+        impact: 'quality',
+      });
     }
 
-    // Determine model size in MB
+    // Determine model size and architecture
     const modelSizeMb = this.estimateModelSizeMb(config.baseModel, modelInfo);
+    const blockCount = archInfo?.blockCount || this.estimateBlockCount(config.baseModel);
+    const billions = this.extractBillions(config.baseModel);
+
+    // Calculate GPU layer offload (num_gpu)
+    const numGpu = config.numGpu ?? this.calculateNumGpu(hardware, modelSizeMb, blockCount, recommendations);
+
+    // Calculate thread count
+    const numThread = config.numThread ?? this.calculateNumThread(hardware, numGpu, blockCount, recommendations);
+
+    // Calculate batch size
+    const numBatch = config.numBatch ?? this.calculateNumBatch(hardware, modelSizeMb, numGpu, blockCount, recommendations);
 
     // Determine available memory for KV cache
-    const availableVram = hardware.gpuVramMb > 0 ? hardware.gpuVramMb : hardware.systemRamMb;
-    const memoryForKv = Math.max(0, availableVram - modelSizeMb - 512); // 512MB overhead buffer
+    const gpuLayersMb = blockCount > 0 ? (modelSizeMb / blockCount) * numGpu : 0;
+    const availableForKv = hardware.gpuVramMb > 0
+      ? Math.max(0, hardware.gpuVramMb - gpuLayersMb - 512)
+      : Math.max(0, hardware.systemRamMb - modelSizeMb - 512);
 
     // Recommend KV cache type
-    const kvCacheType = config.kvCacheType || this.recommendKvCacheType(memoryForKv, modelSizeMb, hardware);
+    const kvCacheType = config.kvCacheType || this.recommendKvCacheType(availableForKv, modelSizeMb);
     const kvMultiplier = KV_CACHE_TYPES[kvCacheType as keyof typeof KV_CACHE_TYPES]?.memoryMultiplier ?? 1.0;
 
     if (kvCacheType !== 'f16') {
-      recommendations.push(
-        `Recommended ${kvCacheType} KV cache to maximize context window within ${availableVram}MB available memory.`
-      );
-      recommendations.push(
-        `Set OLLAMA_KV_CACHE_TYPE=${kvCacheType} environment variable before starting Ollama.`
-      );
-      recommendations.push(
-        `Requires Flash Attention support. Ollama will fall back to f16 if unsupported.`
-      );
+      recommendations.push({
+        parameter: 'kv_cache_type',
+        value: kvCacheType,
+        rationale: `${kvCacheType} reduces KV cache memory by ${Math.round((1 - kvMultiplier) * 100)}% to maximize context window within ${Math.round(availableForKv)}MB available.`,
+        impact: 'memory',
+      });
     }
 
     // Calculate optimal context size
-    const kvBytesPerToken = this.estimateKvBytesPerToken(config.baseModel, modelInfo) * kvMultiplier;
-    const maxCtxFromMemory = Math.floor((memoryForKv * 1024 * 1024) / kvBytesPerToken);
-    const maxContextTokens = config.maxContextTokens || Math.min(maxCtxFromMemory, 131072); // cap at 128k
+    const kvBytesPerToken = this.estimateKvBytesPerToken(billions, archInfo) * kvMultiplier;
+    const maxCtxFromMemory = kvBytesPerToken > 0
+      ? Math.floor((availableForKv * 1024 * 1024) / kvBytesPerToken)
+      : 4096;
+    const maxContextTokens = config.maxContextTokens || Math.min(Math.max(maxCtxFromMemory, 2048), 131072);
 
-    recommendations.push(
-      `Calculated ${maxContextTokens.toLocaleString()} token context window based on ${availableVram}MB available memory.`
-    );
+    recommendations.push({
+      parameter: 'num_ctx',
+      value: maxContextTokens,
+      rationale: `Context window calculated from ${Math.round(availableForKv)}MB available memory after model layers and overhead.`,
+      impact: 'memory',
+    });
+
+    // Split ratio description
+    const gpuPercent = blockCount > 0 ? Math.round((numGpu / blockCount) * 100) : 0;
+    const splitRatio = numGpu === 0
+      ? 'CPU only — no GPU offload'
+      : numGpu >= blockCount
+      ? '100% GPU — full model in VRAM'
+      : `${gpuPercent}% GPU / ${100 - gpuPercent}% CPU (${numGpu}/${blockCount} layers)`;
+
+    // PCIe bandwidth note for split inference
+    if (numGpu > 0 && numGpu < blockCount && hardware.pcieGeneration) {
+      const bw = hardware.pcieBandwidthGBs || 0;
+      recommendations.push({
+        parameter: 'pcie',
+        value: `Gen ${hardware.pcieGeneration}`,
+        rationale: `Split inference uses PCIe ${hardware.pcieGeneration}.0 at ~${bw} GB/s. CPU↔GPU transfer adds latency per token.`,
+        impact: 'performance',
+      });
+    }
+
+    // Storage advice
+    const storageAdvice = modelSizeMb > hardware.gpuVramMb
+      ? 'Model exceeds VRAM — ensure model files are on NVMe for fastest loading. Avoid HDD.'
+      : 'Model fits in VRAM — storage speed only affects initial load time.';
 
     // Merge use case defaults with overrides
     const useCaseDefaults = USE_CASE_DEFAULTS[config.useCase] || USE_CASE_DEFAULTS.chat;
@@ -142,23 +202,141 @@ export class ModelfileGenerator {
 
     // Estimate total VRAM usage
     const kvCacheMb = (maxContextTokens * kvBytesPerToken) / (1024 * 1024);
-    const estimatedVramMb = Math.round(modelSizeMb + kvCacheMb + 512);
+    const estimatedVramMb = Math.round(gpuLayersMb + kvCacheMb + 512);
 
     // Generate Modelfile content
-    const content = this.buildModelfile(finalConfig, maxContextTokens, recommendations);
+    const content = this.buildModelfile(finalConfig, maxContextTokens, numGpu, numThread, numBatch, recommendations);
 
     return {
       content,
       recommendations,
       estimatedVramMb,
       maxContextTokens,
+      numGpu,
+      numThread,
+      numBatch,
+      splitRatio,
+      storageAdvice,
     };
+  }
+
+  private calculateNumGpu(
+    hardware: HardwareProfile,
+    modelSizeMb: number,
+    blockCount: number,
+    recommendations: Recommendation[]
+  ): number {
+    if (hardware.gpuVramMb <= 0 || blockCount <= 0) {
+      recommendations.push({
+        parameter: 'num_gpu',
+        value: 0,
+        rationale: 'No GPU detected or model architecture unknown. Running on CPU.',
+        impact: 'performance',
+      });
+      return 0;
+    }
+
+    const perLayerMb = modelSizeMb / blockCount;
+    // Reserve 20% of VRAM for KV cache + activations + overhead
+    const usableVramMb = hardware.gpuVramMb * 0.80;
+    const fittableLayers = Math.floor(usableVramMb / perLayerMb);
+    const numGpu = Math.min(fittableLayers, blockCount);
+
+    recommendations.push({
+      parameter: 'num_gpu',
+      value: numGpu,
+      rationale: `${numGpu}/${blockCount} layers fit in ${hardware.gpuVramMb}MB VRAM (~${Math.round(perLayerMb)}MB/layer, 20% reserved for KV cache).`,
+      impact: 'performance',
+    });
+
+    return numGpu;
+  }
+
+  private calculateNumThread(
+    hardware: HardwareProfile,
+    numGpu: number,
+    blockCount: number,
+    recommendations: Recommendation[]
+  ): number {
+    const physical = hardware.cpuPhysicalCores || Math.max(1, Math.floor(hardware.cpuCores / 2));
+
+    let numThread: number;
+    let rationale: string;
+
+    if (numGpu >= blockCount && blockCount > 0) {
+      // Full GPU offload — CPU only handles pre/post processing
+      numThread = Math.max(1, Math.floor(physical / 2));
+      rationale = `Full GPU offload — CPU handles pre/post processing only. Using ${numThread}/${physical} physical cores.`;
+    } else if (numGpu > 0) {
+      // Partial offload — CPU does significant compute
+      numThread = Math.max(1, physical - 2);
+      rationale = `Split inference — CPU computes ${blockCount - numGpu} layers. Using ${numThread}/${physical} physical cores (2 reserved for OS/Ollama).`;
+    } else {
+      // CPU only — use most cores
+      numThread = Math.max(1, physical - 1);
+      rationale = `CPU-only inference. Using ${numThread}/${physical} physical cores (1 reserved for OS).`;
+    }
+
+    recommendations.push({
+      parameter: 'num_thread',
+      value: numThread,
+      rationale,
+      impact: 'performance',
+    });
+
+    return numThread;
+  }
+
+  private calculateNumBatch(
+    hardware: HardwareProfile,
+    modelSizeMb: number,
+    numGpu: number,
+    blockCount: number,
+    recommendations: Recommendation[]
+  ): number {
+    let numBatch = 512; // Ollama default
+    let rationale: string;
+
+    if (hardware.gpuVramMb > 0 && numGpu > 0) {
+      const gpuLayersMb = blockCount > 0 ? (modelSizeMb / blockCount) * numGpu : modelSizeMb;
+      const vramHeadroom = hardware.gpuVramMb - gpuLayersMb - 512;
+
+      if (vramHeadroom > 2048) {
+        numBatch = 2048;
+        rationale = `${Math.round(vramHeadroom)}MB VRAM headroom — large batch for faster prompt eval.`;
+      } else if (vramHeadroom > 1024) {
+        numBatch = 1024;
+        rationale = `${Math.round(vramHeadroom)}MB VRAM headroom — increased batch size.`;
+      } else if (vramHeadroom > 256) {
+        numBatch = 512;
+        rationale = `${Math.round(vramHeadroom)}MB VRAM headroom — default batch size.`;
+      } else {
+        numBatch = 256;
+        rationale = `Tight VRAM (${Math.round(vramHeadroom)}MB headroom) — reduced batch to prevent OOM.`;
+      }
+    } else {
+      // CPU only — batch size limited by memory bandwidth
+      numBatch = 512;
+      rationale = 'CPU inference — default batch size (limited by memory bandwidth, not VRAM).';
+    }
+
+    recommendations.push({
+      parameter: 'num_batch',
+      value: numBatch,
+      rationale,
+      impact: 'performance',
+    });
+
+    return numBatch;
   }
 
   private buildModelfile(
     config: ModelfileConfig & Partial<typeof USE_CASE_DEFAULTS.chat>,
     numCtx: number,
-    recommendations: string[]
+    numGpu: number,
+    numThread: number,
+    numBatch: number,
+    recommendations: Recommendation[]
   ): string {
     const lines: string[] = [
       `# Inference Forge — Auto-generated Modelfile`,
@@ -166,11 +344,14 @@ export class ModelfileGenerator {
       `# Use case: ${config.useCase}`,
       `# Generated: ${new Date().toISOString()}`,
       `#`,
-      ...recommendations.map((r) => `# ${r}`),
+      ...recommendations.map((r) => `# [${r.impact}] ${r.parameter}: ${r.rationale}`),
       ``,
       `FROM ${config.baseModel}`,
       ``,
-      `# Context window`,
+      `# Hardware-optimized parameters`,
+      `PARAMETER num_gpu ${numGpu}`,
+      `PARAMETER num_thread ${numThread}`,
+      `PARAMETER num_batch ${numBatch}`,
       `PARAMETER num_ctx ${numCtx}`,
       ``,
       `# Sampling parameters (optimized for ${config.useCase})`,
@@ -187,39 +368,61 @@ export class ModelfileGenerator {
     return lines.join('\n') + '\n';
   }
 
-  private estimateModelSizeMb(name: string, _info: ModelInfo | null): number {
-    // Parse parameter size from model name heuristic
+  private estimateModelSizeMb(name: string, info: ModelInfo | null): number {
+    // Try to get actual size from model info parameter_size
+    if (info?.details?.parameter_size) {
+      const match = info.details.parameter_size.match(/([\d.]+)\s*B/i);
+      if (match) {
+        const billions = parseFloat(match[1]);
+        // Quantized models: estimate based on quantization level
+        const quantLevel = info.details.quantization_level?.toLowerCase() || '';
+        const bytesPerParam = quantLevel.includes('q4') ? 0.5
+          : quantLevel.includes('q5') ? 0.625
+          : quantLevel.includes('q6') ? 0.75
+          : quantLevel.includes('q8') ? 1.0
+          : quantLevel.includes('f16') ? 2.0
+          : 0.5; // default to Q4 estimate
+        return Math.round(billions * 1000 * bytesPerParam);
+      }
+    }
+    // Fallback: parse from name
     const match = name.match(/(\d+\.?\d*)[bB]/);
     if (match) {
-      const billions = parseFloat(match[1]);
-      // Q4 quantized models ≈ 0.5 bytes per param
-      return Math.round(billions * 1000 * 0.5);
+      return Math.round(parseFloat(match[1]) * 1000 * 0.5);
     }
-    return 4096; // default 4GB estimate
+    return 4096;
   }
 
-  private estimateKvBytesPerToken(name: string, _info: ModelInfo | null): number {
-    // KV cache bytes per token depends on model architecture
-    // Rough estimates for common architectures at f16:
-    // 7B ≈ 256 bytes/token, 13B ≈ 384, 70B ≈ 1280
+  private estimateBlockCount(name: string): number {
+    // Rough estimates for common model sizes
+    const billions = this.extractBillions(name);
+    if (billions <= 1) return 16;
+    if (billions <= 3) return 26;
+    if (billions <= 7) return 32;
+    if (billions <= 14) return 40;
+    if (billions <= 34) return 60;
+    if (billions <= 70) return 80;
+    return 96;
+  }
+
+  private extractBillions(name: string): number {
     const match = name.match(/(\d+\.?\d*)[bB]/);
-    if (match) {
-      const billions = parseFloat(match[1]);
-      return Math.round(256 * (billions / 7));
-    }
-    return 256;
+    return match ? parseFloat(match[1]) : 7;
   }
 
-  private recommendKvCacheType(
-    memoryForKvMb: number,
-    modelSizeMb: number,
-    hardware: HardwareProfile
-  ): string {
-    // If plenty of memory, use f16
+  private estimateKvBytesPerToken(billions: number, archInfo: ModelArchInfo | null): number {
+    if (archInfo && archInfo.embeddingLength > 0 && archInfo.headCountKv > 0) {
+      // Precise calculation: 2 (K+V) * layers * kv_heads * head_dim * 2 bytes (f16)
+      const headDim = archInfo.embeddingLength / archInfo.headCount;
+      return 2 * archInfo.blockCount * archInfo.headCountKv * headDim * 2;
+    }
+    // Fallback heuristic
+    return Math.round(256 * (billions / 7));
+  }
+
+  private recommendKvCacheType(memoryForKvMb: number, modelSizeMb: number): string {
     if (memoryForKvMb > modelSizeMb * 0.5) return 'f16';
-    // If moderate memory, use q8
     if (memoryForKvMb > modelSizeMb * 0.25) return 'q8_0';
-    // Tight on memory, use q4
     return 'q4_0';
   }
 }

@@ -6,18 +6,21 @@ import { KvCachePanel } from './KvCachePanel';
 import { MetricsChart } from './MetricsChart';
 import { BenchmarkRunner } from './BenchmarkRunner';
 import { ModelfileEditor } from './ModelfileEditor';
+import { PressurePanel } from './PressurePanel';
+import { IoProfilePanel } from './IoProfilePanel';
 
-type Tab = 'monitor' | 'benchmark' | 'modelfile';
+type Tab = 'monitor' | 'benchmark' | 'modelfile' | 'analysis';
 
 export function Dashboard() {
   const wsUrl = `ws://${window.location.hostname}:3001/ws`;
-  const { metrics, connected } = useWebSocket(wsUrl);
+  const { metrics, connected, benchmarkProgress, pressureData } = useWebSocket(wsUrl);
   const [activeTab, setActiveTab] = useState<Tab>('monitor');
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'monitor', label: 'Monitor' },
     { id: 'benchmark', label: 'Benchmark' },
     { id: 'modelfile', label: 'Modelfile' },
+    { id: 'analysis', label: 'Analysis' },
   ];
 
   return (
@@ -93,16 +96,29 @@ export function Dashboard() {
               <KvCachePanel
                 estimates={metrics?.kvCache?.estimatedPerModel || []}
               />
+              <PressurePanel
+                pressure={pressureData}
+                models={metrics?.models?.available}
+              />
             </div>
           </div>
         )}
 
         {activeTab === 'benchmark' && (
-          <BenchmarkRunner models={metrics?.models?.available || []} />
+          <BenchmarkRunner
+            models={metrics?.models?.available || []}
+            benchmarkProgress={benchmarkProgress}
+          />
         )}
 
         {activeTab === 'modelfile' && (
           <ModelfileEditor models={metrics?.models?.available || []} />
+        )}
+
+        {activeTab === 'analysis' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <IoProfilePanel />
+          </div>
         )}
       </main>
     </div>

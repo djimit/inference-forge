@@ -9,6 +9,8 @@ import { monitor, type SystemMetrics } from '../services/monitor.js';
 import { hardware, type HardwareSnapshot } from '../services/hardware.js';
 import { alerts, type Alert } from '../services/alerts.js';
 import { throughput, type ThroughputSnapshot } from '../services/throughput.js';
+import { benchmark } from '../services/benchmark.js';
+import { pressure, type ResourcePressure } from '../services/pressure.js';
 
 export function setupWebSocket(server: Server): WebSocketServer {
   const wss = new WebSocketServer({ server, path: '/ws' });
@@ -43,6 +45,20 @@ export function setupWebSocket(server: Server): WebSocketServer {
     unsubscribers.push(
       throughput.subscribe((snapshot: ThroughputSnapshot) => {
         send(ws, 'throughput', snapshot);
+      })
+    );
+
+    // Subscribe to benchmark progress
+    unsubscribers.push(
+      benchmark.subscribeProgress((message: string, progress: number) => {
+        send(ws, 'benchmark-progress', { message, progress });
+      })
+    );
+
+    // Subscribe to resource pressure
+    unsubscribers.push(
+      pressure.subscribe((data: ResourcePressure) => {
+        send(ws, 'pressure', data);
       })
     );
 

@@ -5,8 +5,18 @@ interface WSMessage {
   data: any;
 }
 
+export interface BenchmarkProgress {
+  message: string;
+  progress: number;
+}
+
 export function useWebSocket(url: string) {
   const [metrics, setMetrics] = useState<any>(null);
+  const [hardwareData, setHardwareData] = useState<any>(null);
+  const [alertsData, setAlertsData] = useState<any[]>([]);
+  const [throughputData, setThroughputData] = useState<any>(null);
+  const [pressureData, setPressureData] = useState<any>(null);
+  const [benchmarkProgress, setBenchmarkProgress] = useState<BenchmarkProgress | null>(null);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -19,14 +29,37 @@ export function useWebSocket(url: string) {
 
     ws.onopen = () => {
       setConnected(true);
-      console.log('[WS] Connected');
     };
 
     ws.onmessage = (event) => {
       try {
         const msg: WSMessage = JSON.parse(event.data);
-        if (msg.type === 'metrics') {
-          setMetrics(msg.data);
+        switch (msg.type) {
+          case 'metrics':
+            setMetrics(msg.data);
+            break;
+          case 'hardware':
+            setHardwareData(msg.data);
+            break;
+          case 'alert':
+            setAlertsData((prev) => [msg.data, ...prev].slice(0, 50));
+            break;
+          case 'alerts':
+            setAlertsData(Array.isArray(msg.data) ? msg.data : []);
+            break;
+          case 'throughput':
+            setThroughputData(msg.data);
+            break;
+          case 'pressure':
+            setPressureData(msg.data);
+            break;
+          case 'benchmark-progress':
+            setBenchmarkProgress(msg.data);
+            // Clear progress after completion
+            if (msg.data.progress >= 1) {
+              setTimeout(() => setBenchmarkProgress(null), 3000);
+            }
+            break;
         }
       } catch (err) {
         console.error('[WS] Parse error:', err);
@@ -35,7 +68,6 @@ export function useWebSocket(url: string) {
 
     ws.onclose = () => {
       setConnected(false);
-      console.log('[WS] Disconnected, reconnecting in 3s...');
       reconnectTimer.current = setTimeout(connect, 3000);
     };
 
@@ -52,5 +84,9 @@ export function useWebSocket(url: string) {
     };
   }, [connect]);
 
-  return { metrics, connected };
+  return {
+    metrics, connected,
+    hardwareData, alertsData, throughputData,
+    pressureData, benchmarkProgress,
+  };
 }

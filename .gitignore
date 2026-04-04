@@ -5,3 +5,6 @@ dist/
 *.log
 .DS_Store
 .vite/
+*.db
+*.db-shm
+*.db-wal

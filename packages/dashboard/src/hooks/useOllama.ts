@@ -47,5 +47,58 @@ export function useOllama() {
     [apiCall]
   );
 
-  return { loading, error, startBenchmark, getBenchmarkResult, generateModelfile, apiCall };
+  const generateModelfileAuto = useCallback(
+    (config: any) =>
+      apiCall('/modelfile/generate-auto', {
+        method: 'POST',
+        body: JSON.stringify({ config }),
+      }),
+    [apiCall]
+  );
+
+  const getHardware = useCallback(
+    () => apiCall('/hardware/last'),
+    [apiCall]
+  );
+
+  const startExpandedBenchmark = useCallback(
+    (config: any) =>
+      apiCall('/benchmark/run-expanded', {
+        method: 'POST',
+        body: JSON.stringify(config),
+      }),
+    [apiCall]
+  );
+
+  const getBenchmarkHistory = useCallback(
+    () => apiCall('/benchmark/history'),
+    [apiCall]
+  );
+
+  const getPressure = useCallback(
+    () => apiCall('/pressure'),
+    [apiCall]
+  );
+
+  const predictPressure = useCallback(
+    (model: string) =>
+      apiCall('/pressure/predict', {
+        method: 'POST',
+        body: JSON.stringify({ model }),
+      }),
+    [apiCall]
+  );
+
+  const getIoProfile = useCallback(
+    () => apiCall('/io/profile'),
+    [apiCall]
+  );
+
+  return {
+    loading, error, apiCall,
+    startBenchmark, getBenchmarkResult, generateModelfile,
+    generateModelfileAuto, getHardware,
+    startExpandedBenchmark, getBenchmarkHistory,
+    getPressure, predictPressure, getIoProfile,
+  };
 }

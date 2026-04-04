@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import { ollama } from '../services/ollama.js';
 import { monitor } from '../services/monitor.js';
-import { benchmark, STANDARD_PROMPTS, type BenchmarkConfig } from '../services/benchmark.js';
+import { benchmark, STANDARD_PROMPTS, type BenchmarkConfig, type ExpandedBenchmarkConfig } from '../services/benchmark.js';
 import { modelfileGenerator, type HardwareProfile, type ModelfileConfig } from '../services/modelfile.js';
 import { hardware } from '../services/hardware.js';
 import { throughput } from '../services/throughput.js';
@@ -14,6 +14,10 @@ import { perplexity } from '../services/perplexity.js';
 import { promptLibrary } from '../services/prompt-library.js';
 import { modelfileLibrary } from '../services/modelfile-library.js';
 import { orchestrator, type AgentConfig, type Workflow } from '../services/orchestrator.js';
+import { pressure } from '../services/pressure.js';
+import { database } from '../services/database.js';
+import { ioProfiler } from '../services/io-profiler.js';
+import { costTracker } from '../services/cost-tracker.js';
 
 export const router = Router();
 
@@ -194,6 +198,38 @@ router.get('/benchmark/result', (_req, res) => {
   res.json(result);
 });
 
+router.post('/benchmark/run-expanded', async (req, res) => {
+  if (benchmark.isRunning()) {
+    res.status(409).json({ error: 'Benchmark already in progress' });
+    return;
+  }
+
+  const config = req.body as ExpandedBenchmarkConfig;
+  if (!config.model || !config.mode) {
+    res.status(400).json({ error: 'model and mode are required' });
+    return;
+  }
+
+  res.json({ status: 'started', config });
+
+  try {
+    const result = await benchmark.runExpanded(config);
+    (globalThis as any).__lastExpandedBenchmarkResult = result;
+    (globalThis as any).__lastBenchmarkResult = result;
+  } catch (err) {
+    console.error('[Benchmark] Expanded error:', err);
+  }
+});
+
+router.get('/benchmark/result-expanded', (_req, res) => {
+  const result = (globalThis as any).__lastExpandedBenchmarkResult;
+  if (!result) {
+    res.status(404).json({ error: 'No expanded benchmark result available' });
+    return;
+  }
+  res.json(result);
+});
+
 router.get('/benchmark/export/:format', (req, res) => {
   const result = (globalThis as any).__lastBenchmarkResult;
   if (!result) {
@@ -208,6 +244,32 @@ router.get('/benchmark/export/:format', (req, res) => {
   } else {
     res.status(400).json({ error: 'Supported formats: json' });
   }
+});
+
+// -- History (SQLite) -----------------------------------------------
+
+router.get('/benchmark/history', (_req, res) => {
+  const limit = parseInt(String(_req.query.limit) || '50', 10);
+  const mode = _req.query.mode as string | undefined;
+  res.json({ runs: database.listBenchmarkRuns(limit, mode) });
+});
+
+router.get('/benchmark/history/:id', (req, res) => {
+  const run = database.getBenchmarkRun(req.params.id);
+  if (!run) { res.status(404).json({ error: 'Benchmark run not found' }); return; }
+  res.json(run);
+});
+
+router.get('/hardware/history', (req, res) => {
+  const since = parseInt(String(req.query.since) || '0', 10);
+  const limit = parseInt(String(req.query.limit) || '100', 10);
+  res.json({ snapshots: database.getHardwareHistory(since, limit) });
+});
+
+router.get('/alerts/history', (req, res) => {
+  const limit = parseInt(String(req.query.limit) || '100', 10);
+  const since = req.query.since ? parseInt(String(req.query.since), 10) : undefined;
+  res.json({ alerts: database.getAlertHistory(limit, since) });
 });
 
 // -- v0.3: Perplexity -----------------------------------------------
@@ -368,6 +430,125 @@ router.post('/modelfile/generate', async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: 'Failed to generate Modelfile', details: String(err) });
+  }
+});
+
+router.post('/modelfile/generate-auto', async (req, res) => {
+  const { config } = req.body as { config: ModelfileConfig };
+  if (!config) {
+    res.status(400).json({ error: 'config is required' });
+    return;
+  }
+
+  const snapshot = hardware.getLastSnapshot();
+  if (!snapshot) {
+    res.status(503).json({ error: 'Hardware not detected yet. Try again shortly.' });
+    return;
+  }
+
+  const gpu = snapshot.gpus[0];
+  const profile: HardwareProfile = {
+    gpuVramMb: gpu?.vramFreeMb || 0,
+    systemRamMb: snapshot.system.ramTotalMb,
+    gpuName: gpu?.name || 'CPU Only',
+    cpuCores: snapshot.system.cpuCores,
+    cpuPhysicalCores: snapshot.system.cpuPhysicalCores,
+    pcieGeneration: snapshot.system.pcieGeneration,
+    pcieBandwidthGBs: snapshot.system.pcieBandwidthGBs,
+  };
+
+  try {
+    const result = await modelfileGenerator.generate(profile, config);
+    res.json({ ...result, hardwareDetected: profile });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to generate Modelfile', details: String(err) });
+  }
+});
+
+// -- I/O Profiling --------------------------------------------------
+
+router.get('/io/profile', async (_req, res) => {
+  try {
+    const profile = await ioProfiler.profile();
+    res.json(profile);
+  } catch (err) {
+    res.status(500).json({ error: 'I/O profiling failed', details: String(err) });
+  }
+});
+
+router.post('/io/benchmark', async (_req, res) => {
+  if (ioProfiler.isBenchmarkRunning()) {
+    res.status(409).json({ error: 'I/O benchmark already running' });
+    return;
+  }
+  res.json({ status: 'started' });
+  ioProfiler.runBenchmark().catch((err) => console.error('[IO] Benchmark error:', err));
+});
+
+router.get('/io/benchmark/result', (_req, res) => {
+  const profile = ioProfiler.getLastProfile();
+  res.json({
+    readBandwidthMBs: profile?.readBandwidthMBs || null,
+    running: ioProfiler.isBenchmarkRunning(),
+  });
+});
+
+// -- Cost Tracking ---------------------------------------------------
+
+router.get('/costs', (_req, res) => {
+  res.json(costTracker.getSnapshot());
+});
+
+router.post('/costs/record', (req, res) => {
+  const sample = req.body;
+  if (!sample.provider || !sample.model) {
+    res.status(400).json({ error: 'provider and model required' });
+    return;
+  }
+  sample.timestamp = sample.timestamp || Date.now();
+  sample.estimatedCostUsd = sample.estimatedCostUsd ||
+    costTracker.estimateCost(sample.provider, sample.model, sample.inputTokens || 0, sample.outputTokens || 0);
+  costTracker.recordUsage(sample);
+  res.json({ success: true, estimatedCostUsd: sample.estimatedCostUsd });
+});
+
+router.post('/costs/budget', (req, res) => {
+  const { budgetUsd } = req.body;
+  if (typeof budgetUsd !== 'number') {
+    res.status(400).json({ error: 'budgetUsd must be a number' });
+    return;
+  }
+  costTracker.setCreditBudget(budgetUsd);
+  res.json({ success: true });
+});
+
+router.get('/costs/samples', (req, res) => {
+  const limit = parseInt(String(req.query.limit) || '100', 10);
+  res.json({ samples: costTracker.getSamples(limit) });
+});
+
+// -- Resource Pressure -----------------------------------------------
+
+router.get('/pressure', (_req, res) => {
+  const data = pressure.getLastPressure();
+  if (!data) {
+    res.status(503).json({ error: 'Pressure data not available yet' });
+    return;
+  }
+  res.json(data);
+});
+
+router.post('/pressure/predict', async (req, res) => {
+  const { model } = req.body as { model: string };
+  if (!model) {
+    res.status(400).json({ error: 'model is required' });
+    return;
+  }
+  try {
+    const prediction = await pressure.predictLoadImpact(model);
+    res.json(prediction);
+  } catch (err) {
+    res.status(500).json({ error: 'Prediction failed', details: String(err) });
   }
 });
 

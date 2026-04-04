@@ -29,9 +29,13 @@ export interface SystemInfo {
   platform: string;
   cpuModel: string;
   cpuCores: number;
+  cpuPhysicalCores: number;
   ramTotalMb: number;
   ramFreeMb: number;
   ramUsedMb: number;
+  pcieGeneration: number | null;
+  pcieLanes: number | null;
+  pcieBandwidthGBs: number | null;
 }
 
 export interface HardwareSnapshot {
@@ -188,20 +192,95 @@ async function detectAppleSilicon(): Promise<GpuInfo[]> {
   }
 }
 
+// -- Physical Core Detection ----------------------------------------
+
+async function detectPhysicalCores(): Promise<number> {
+  const logicalCores = cpus().length;
+  try {
+    if (platform() === 'win32') {
+      // PowerShell is more reliable than wmic on modern Windows
+      const { stdout } = await execAsync(
+        'powershell -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfCores -Sum).Sum"',
+        { timeout: 5000 }
+      );
+      const cores = parseInt(stdout.trim(), 10);
+      if (cores > 0) return cores;
+    } else if (platform() === 'darwin') {
+      const { stdout } = await execAsync('sysctl -n hw.physicalcpu', { timeout: 3000 });
+      const cores = parseInt(stdout.trim(), 10);
+      if (cores > 0) return cores;
+    } else {
+      // Linux: count unique physical core IDs
+      const { stdout } = await execAsync(
+        'grep "^core id" /proc/cpuinfo | sort -u | wc -l',
+        { timeout: 3000 }
+      );
+      const cores = parseInt(stdout.trim(), 10);
+      if (cores > 0) return cores;
+    }
+  } catch {
+    // Fall back to logical / 2 as rough estimate
+  }
+  return Math.max(1, Math.floor(logicalCores / 2));
+}
+
+// -- PCIe Detection -------------------------------------------------
+
+interface PcieInfo {
+  generation: number | null;
+  lanes: number | null;
+  bandwidthGBs: number | null;
+}
+
+async function detectPcieInfo(): Promise<PcieInfo> {
+  try {
+    const { stdout } = await execAsync(
+      'nvidia-smi --query-gpu=pcie.link.gen.current,pcie.link.width.current --format=csv,noheader,nounits',
+      { timeout: 5000 }
+    );
+    const line = stdout.trim().split('\n')[0];
+    if (!line) return { generation: null, lanes: null, bandwidthGBs: null };
+
+    const [genStr, widthStr] = line.split(',').map((s) => s.trim());
+    const gen = parseInt(genStr, 10) || null;
+    const lanes = parseInt(widthStr, 10) || null;
+
+    // Theoretical per-lane bandwidth (GT/s → GB/s with 128b/130b encoding for gen3+)
+    const perLaneMBs: Record<number, number> = { 3: 985, 4: 1969, 5: 3938 };
+    const bandwidthGBs =
+      gen && lanes && perLaneMBs[gen]
+        ? Math.round((perLaneMBs[gen] * lanes) / 1024 * 100) / 100
+        : null;
+
+    return { generation: gen, lanes, bandwidthGBs };
+  } catch {
+    return { generation: null, lanes: null, bandwidthGBs: null };
+  }
+}
+
 // -- System Info ----------------------------------------------------
 
-function getSystemInfo(): SystemInfo {
+async function getSystemInfo(): Promise<SystemInfo> {
   const cpuInfo = cpus();
   const totalMb = Math.round(totalmem() / (1024 * 1024));
   const freeMb = Math.round(freemem() / (1024 * 1024));
+
+  const [physicalCores, pcie] = await Promise.all([
+    detectPhysicalCores(),
+    detectPcieInfo(),
+  ]);
 
   return {
     platform: platform(),
     cpuModel: cpuInfo[0]?.model || 'Unknown CPU',
     cpuCores: cpuInfo.length,
+    cpuPhysicalCores: physicalCores,
     ramTotalMb: totalMb,
     ramFreeMb: freeMb,
     ramUsedMb: totalMb - freeMb,
+    pcieGeneration: pcie.generation,
+    pcieLanes: pcie.lanes,
+    pcieBandwidthGBs: pcie.bandwidthGBs,
   };
 }
 
@@ -218,10 +297,9 @@ export class HardwareService {
   }
 
   async detect(): Promise<HardwareSnapshot> {
-    const system = getSystemInfo();
-
-    // Detect GPUs in parallel
-    const [nvidia, amd, apple] = await Promise.all([
+    // Detect system info and GPUs in parallel
+    const [system, nvidia, amd, apple] = await Promise.all([
+      getSystemInfo(),
       detectNvidia(),
       detectAmd(),
       detectAppleSilicon(),
