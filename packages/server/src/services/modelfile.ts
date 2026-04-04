@@ -14,6 +14,8 @@ export interface HardwareProfile {
   gpuName: string;
   cpuCores: number;
   cpuPhysicalCores: number;
+  numaNodes?: number;
+  coresPerNuma?: number;
   pcieGeneration: number | null;
   pcieBandwidthGBs: number | null;
 }
@@ -259,6 +261,8 @@ export class ModelfileGenerator {
     recommendations: Recommendation[]
   ): number {
     const physical = hardware.cpuPhysicalCores || Math.max(1, Math.floor(hardware.cpuCores / 2));
+    const numaNodes = hardware.numaNodes || 1;
+    const coresPerNuma = hardware.coresPerNuma || physical;
 
     let numThread: number;
     let rationale: string;
@@ -269,12 +273,27 @@ export class ModelfileGenerator {
       rationale = `Full GPU offload — CPU handles pre/post processing only. Using ${numThread}/${physical} physical cores.`;
     } else if (numGpu > 0) {
       // Partial offload — CPU does significant compute
-      numThread = Math.max(1, physical - 2);
-      rationale = `Split inference — CPU computes ${blockCount - numGpu} layers. Using ${numThread}/${physical} physical cores (2 reserved for OS/Ollama).`;
+      if (numaNodes > 1) {
+        // NUMA-aware: use cores from adjacent NUMA nodes to minimize cross-node latency
+        // Optimal: threads aligned to NUMA node boundaries
+        const cpuLayers = blockCount - numGpu;
+        const numaNodesNeeded = Math.min(numaNodes, Math.max(1, Math.ceil(cpuLayers / (blockCount / numaNodes))));
+        numThread = Math.max(1, numaNodesNeeded * coresPerNuma - 1);
+        rationale = `Split inference (${cpuLayers} CPU layers) — NUMA-aligned: ${numaNodesNeeded}/${numaNodes} NUMA nodes x ${coresPerNuma} cores. Using ${numThread} threads for cross-node memory locality.`;
+      } else {
+        numThread = Math.max(1, physical - 2);
+        rationale = `Split inference — CPU computes ${blockCount - numGpu} layers. Using ${numThread}/${physical} physical cores (2 reserved for OS/Ollama).`;
+      }
     } else {
-      // CPU only — use most cores
-      numThread = Math.max(1, physical - 1);
-      rationale = `CPU-only inference. Using ${numThread}/${physical} physical cores (1 reserved for OS).`;
+      // CPU only — use most cores, NUMA-aligned
+      if (numaNodes > 1) {
+        // For CPU-only on multi-NUMA, use all nodes but leave 1 core per node for OS
+        numThread = Math.max(1, physical - numaNodes);
+        rationale = `CPU-only inference on ${numaNodes}-node NUMA topology (${coresPerNuma} cores/node). Using ${numThread}/${physical} cores (1 reserved per NUMA node for OS/memory controller).`;
+      } else {
+        numThread = Math.max(1, physical - 1);
+        rationale = `CPU-only inference. Using ${numThread}/${physical} physical cores (1 reserved for OS).`;
+      }
     }
 
     recommendations.push({
@@ -283,6 +302,15 @@ export class ModelfileGenerator {
       rationale,
       impact: 'performance',
     });
+
+    if (numaNodes > 1) {
+      recommendations.push({
+        parameter: 'numa',
+        value: `${numaNodes} nodes`,
+        rationale: `Multi-NUMA CPU detected (${numaNodes} nodes, ${coresPerNuma} cores each). Thread count aligned to NUMA boundaries for optimal memory access latency.`,
+        impact: 'performance',
+      });
+    }
 
     return numThread;
   }

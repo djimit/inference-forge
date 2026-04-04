@@ -79,8 +79,10 @@ export function AgentPanel({ models }: AgentPanelProps) {
     }
   };
 
+  const [streaming, setStreaming] = useState(false);
+
   const handleSend = async () => {
-    if (!activeSession || !message.trim()) return;
+    if (!activeSession || !message.trim() || streaming) return;
     const msg = message;
     setMessage('');
 
@@ -90,16 +92,71 @@ export function AgentPanel({ models }: AgentPanelProps) {
       messages: [...prev.messages, { role: 'user', content: msg, timestamp: Date.now() }],
     } : prev);
 
-    const res = await apiCall<{ response: string }>(`/sessions/${activeSession.id}/message`, {
-      method: 'POST',
-      body: JSON.stringify({ content: msg }),
-    });
+    // Add empty assistant message that will be filled by streaming
+    setActiveSession((prev) => prev ? {
+      ...prev,
+      messages: [...prev.messages, { role: 'assistant', content: '', timestamp: Date.now() }],
+    } : prev);
 
-    if (res) {
-      setActiveSession((prev) => prev ? {
-        ...prev,
-        messages: [...prev.messages, { role: 'assistant', content: res.response, timestamp: Date.now() }],
-      } : prev);
+    setStreaming(true);
+
+    try {
+      const response = await fetch(`/api/sessions/${activeSession.id}/message/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: msg }),
+      });
+
+      if (!response.ok || !response.body) {
+        // Fallback to non-streaming
+        const fallback = await apiCall<{ response: string }>(`/sessions/${activeSession.id}/message`, {
+          method: 'POST',
+          body: JSON.stringify({ content: msg }),
+        });
+        if (fallback) {
+          setActiveSession((prev) => {
+            if (!prev) return prev;
+            const msgs = [...prev.messages];
+            msgs[msgs.length - 1] = { role: 'assistant', content: fallback.response, timestamp: Date.now() };
+            return { ...prev, messages: msgs };
+          });
+        }
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const match = line.match(/^data:\s*(.+)/);
+          if (!match) continue;
+          try {
+            const event = JSON.parse(match[1]);
+            if (event.type === 'token') {
+              setActiveSession((prev) => {
+                if (!prev) return prev;
+                const msgs = [...prev.messages];
+                const last = msgs[msgs.length - 1];
+                msgs[msgs.length - 1] = { ...last, content: last.content + event.content };
+                return { ...prev, messages: msgs };
+              });
+            }
+          } catch { /* skip */ }
+        }
+      }
+    } catch {
+      // Stream failed silently — message already in UI
+    } finally {
+      setStreaming(false);
     }
   };
 
@@ -202,7 +259,7 @@ export function AgentPanel({ models }: AgentPanelProps) {
               />
               <button
                 onClick={handleSend}
-                disabled={!message.trim() || loading}
+                disabled={!message.trim() || loading || streaming}
                 className="px-4 py-2 bg-forge-accent text-white rounded-lg text-sm font-medium hover:bg-indigo-500 disabled:opacity-50 transition-colors"
               >
                 Send

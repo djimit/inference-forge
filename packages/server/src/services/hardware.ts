@@ -30,6 +30,8 @@ export interface SystemInfo {
   cpuModel: string;
   cpuCores: number;
   cpuPhysicalCores: number;
+  numaNodes: number;
+  coresPerNuma: number;
   ramTotalMb: number;
   ramFreeMb: number;
   ramUsedMb: number;
@@ -224,6 +226,42 @@ async function detectPhysicalCores(): Promise<number> {
   return Math.max(1, Math.floor(logicalCores / 2));
 }
 
+// -- NUMA Detection -------------------------------------------------
+
+async function detectNumaNodes(physicalCores: number): Promise<{ nodes: number; coresPerNode: number }> {
+  try {
+    if (platform() === 'win32') {
+      const { stdout } = await execAsync(
+        'powershell -Command "(Get-CimInstance Win32_Processor).NumberOfNumaNodes"',
+        { timeout: 5000 }
+      );
+      const nodes = parseInt(stdout.trim(), 10);
+      if (nodes > 0) return { nodes, coresPerNode: Math.ceil(physicalCores / nodes) };
+
+      // Fallback: Threadripper heuristic from CPU model name
+      const cpuModel = cpus()[0]?.model || '';
+      if (/threadripper\s*(39[0-9]{2}|59[0-9]{2}|79[0-9]{2})/i.test(cpuModel)) {
+        // Threadripper PRO 39xx/59xx have 4 NUMA nodes by default (NPS4 / die-per-node)
+        const trNodes = 4;
+        return { nodes: trNodes, coresPerNode: Math.ceil(physicalCores / trNodes) };
+      }
+    } else if (platform() === 'linux') {
+      const { stdout } = await execAsync(
+        'lscpu | grep "NUMA node(s)"',
+        { timeout: 3000 }
+      );
+      const match = stdout.match(/(\d+)/);
+      if (match) {
+        const nodes = parseInt(match[1], 10);
+        return { nodes, coresPerNode: Math.ceil(physicalCores / nodes) };
+      }
+    }
+  } catch {
+    // NUMA detection failed
+  }
+  return { nodes: 1, coresPerNode: physicalCores };
+}
+
 // -- PCIe Detection -------------------------------------------------
 
 interface PcieInfo {
@@ -270,11 +308,15 @@ async function getSystemInfo(): Promise<SystemInfo> {
     detectPcieInfo(),
   ]);
 
+  const numa = await detectNumaNodes(physicalCores);
+
   return {
     platform: platform(),
     cpuModel: cpuInfo[0]?.model || 'Unknown CPU',
     cpuCores: cpuInfo.length,
     cpuPhysicalCores: physicalCores,
+    numaNodes: numa.nodes,
+    coresPerNuma: numa.coresPerNode,
     ramTotalMb: totalMb,
     ramFreeMb: freeMb,
     ramUsedMb: totalMb - freeMb,

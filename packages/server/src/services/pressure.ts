@@ -88,13 +88,15 @@ export class PressureService {
       estimatedVramMb = 4096; // default 4GB estimate
     }
 
+    // Check if model fits entirely in VRAM, partially, or needs full CPU/RAM inference
     const fitsInFreeVram = estimatedVramMb <= vramFreeMb;
+    const ramFreeMb = (hwSnapshot?.system?.ramFreeMb || 0);
+    const ramTotalMb = (hwSnapshot?.system?.ramTotalMb || 0);
 
     // Determine which models would be evicted (oldest first by Ollama's LRU)
     const wouldEvict: string[] = [];
     if (!fitsInFreeVram && this.lastPressure) {
       let reclaimNeeded = estimatedVramMb - vramFreeMb;
-      // Ollama evicts from oldest-loaded, but we don't have expiry order — estimate by size
       const sorted = [...this.lastPressure.loadedModels].sort((a, b) => a.vramUsageMb - b.vramUsageMb);
       for (const model of sorted) {
         if (reclaimNeeded <= 0) break;
@@ -103,11 +105,23 @@ export class PressureService {
       }
     }
 
-    const recommendedAction = fitsInFreeVram
-      ? `Safe to load. ${Math.round(vramFreeMb - estimatedVramMb)}MB VRAM will remain free.`
-      : wouldEvict.length > 0
-      ? `Loading will evict: ${wouldEvict.join(', ')}. Consider unloading models first.`
-      : `Insufficient VRAM. Need ${estimatedVramMb}MB, only ${Math.round(vramFreeMb)}MB free.`;
+    // Smart recommendation: account for CPU/RAM fallback (Ollama splits across GPU+RAM automatically)
+    let recommendedAction: string;
+    if (fitsInFreeVram) {
+      recommendedAction = `Safe to load fully in GPU. ${Math.round(vramFreeMb - estimatedVramMb)}MB VRAM will remain free.`;
+    } else if (estimatedVramMb <= vramTotalMb) {
+      // Fits in total VRAM but needs eviction
+      recommendedAction = wouldEvict.length > 0
+        ? `Loading will evict: ${wouldEvict.join(', ')}. Consider unloading models first.`
+        : `Insufficient free VRAM. Need ${estimatedVramMb}MB, only ${Math.round(vramFreeMb)}MB free.`;
+    } else if (estimatedVramMb <= ramFreeMb + vramFreeMb) {
+      // Model exceeds total VRAM — will run as GPU+CPU split or CPU-only
+      const gpuLayersPct = vramTotalMb > 0 ? Math.round((vramFreeMb / estimatedVramMb) * 100) : 0;
+      const ramNeededMb = estimatedVramMb - vramFreeMb;
+      recommendedAction = `Model exceeds ${vramTotalMb}MB total VRAM — will use split inference: ~${gpuLayersPct}% GPU + ${Math.round(ramNeededMb)}MB system RAM. Expect slower tok/s from CPU layers.`;
+    } else {
+      recommendedAction = `Model needs ${estimatedVramMb}MB but only ${Math.round(vramFreeMb)}MB VRAM + ${Math.round(ramFreeMb)}MB free RAM available. May cause swapping.`;
+    }
 
     return {
       modelName,

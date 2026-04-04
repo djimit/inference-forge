@@ -77,6 +77,20 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_benchmark_runs_mode ON benchmark_runs(mode);
       CREATE INDEX IF NOT EXISTS idx_hardware_snapshots_ts ON hardware_snapshots(timestamp);
       CREATE INDEX IF NOT EXISTS idx_alert_history_ts ON alert_history(timestamp);
+
+      CREATE TABLE IF NOT EXISTS cost_samples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        agent TEXT,
+        input_tokens INTEGER NOT NULL,
+        output_tokens INTEGER NOT NULL,
+        estimated_cost_usd REAL NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_cost_samples_ts ON cost_samples(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_cost_samples_provider ON cost_samples(provider);
     `);
   }
 
@@ -200,6 +214,55 @@ export class DatabaseService {
       return rows.map((r: any) => ({
         ...r,
         acknowledged: !!r.acknowledged,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  // -- Cost Methods ---------------------------------------------------
+
+  saveCostSample(sample: {
+    timestamp: number;
+    provider: string;
+    model: string;
+    agent?: string;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
+  }): void {
+    if (!this.enabled) return;
+    try {
+      this.db.prepare(`
+        INSERT INTO cost_samples (timestamp, provider, model, agent, input_tokens, output_tokens, estimated_cost_usd)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        sample.timestamp,
+        sample.provider,
+        sample.model,
+        sample.agent || null,
+        sample.inputTokens,
+        sample.outputTokens,
+        sample.estimatedCostUsd
+      );
+    } catch (err) {
+      console.error('[Database] saveCostSample error:', err);
+    }
+  }
+
+  getCostSamples(since: number, limit = 500): any[] {
+    if (!this.enabled) return [];
+    try {
+      return this.db.prepare(
+        'SELECT * FROM cost_samples WHERE timestamp > ? ORDER BY timestamp DESC LIMIT ?'
+      ).all(since, limit).map((r: any) => ({
+        timestamp: r.timestamp,
+        provider: r.provider,
+        model: r.model,
+        agent: r.agent,
+        inputTokens: r.input_tokens,
+        outputTokens: r.output_tokens,
+        estimatedCostUsd: r.estimated_cost_usd,
       }));
     } catch {
       return [];

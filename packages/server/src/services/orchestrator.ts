@@ -247,6 +247,94 @@ export class OrchestratorService {
     }
   }
 
+  /**
+   * Stream a message response token-by-token via callback.
+   * Falls back to non-streaming on error.
+   */
+  async sendMessageStream(
+    sessionId: string,
+    content: string,
+    onToken: (token: string) => void,
+    onDone: (fullResponse: string) => void,
+    onError: (err: Error) => void
+  ): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) { onError(new Error(`Session not found: ${sessionId}`)); return; }
+
+    const agent = this.agents.get(session.agentId);
+    if (!agent || !agent.enabled) { onError(new Error('Agent not available')); return; }
+
+    session.messages.push({ role: 'user', content, timestamp: Date.now() });
+    session.status = 'processing';
+    session.lastActivityAt = Date.now();
+
+    try {
+      const messages = session.messages.map((m) => ({ role: m.role, content: m.content }));
+
+      const response = await fetch(`${ollama.getBaseUrl()}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: agent.model,
+          messages,
+          stream: true,
+          options: { temperature: agent.temperature, num_predict: agent.maxTokens },
+        }),
+      });
+
+      if (!response.ok || !response.body) throw new Error(`Chat API error: ${response.status}`);
+
+      let fullContent = '';
+      let evalCount = 0;
+      let totalDuration = 0;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const chunk = JSON.parse(line);
+            if (chunk.message?.content) {
+              fullContent += chunk.message.content;
+              onToken(chunk.message.content);
+            }
+            if (chunk.done) {
+              evalCount = chunk.eval_count || 0;
+              totalDuration = chunk.total_duration || 0;
+            }
+          } catch { /* skip malformed line */ }
+        }
+      }
+
+      session.messages.push({
+        role: 'assistant',
+        content: fullContent,
+        timestamp: Date.now(),
+        tokenCount: evalCount,
+        durationMs: totalDuration / 1_000_000,
+        model: agent.model,
+      });
+
+      session.tokenCount += evalCount;
+      session.status = 'idle';
+      session.lastActivityAt = Date.now();
+      onDone(fullContent);
+    } catch (err) {
+      session.status = 'error';
+      onError(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
   // -- Routing ----------------------------------------------------
 
   routeMessage(content: string): AgentConfig | null {

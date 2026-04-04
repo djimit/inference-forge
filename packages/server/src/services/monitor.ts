@@ -3,7 +3,7 @@
  * Polls Ollama at regular intervals and emits metrics via callback.
  */
 
-import { ollama, type RunningModel, type OllamaModel } from './ollama.js';
+import { ollama, parseModelArch, type RunningModel, type OllamaModel } from './ollama.js';
 
 export interface SystemMetrics {
   timestamp: number;
@@ -40,6 +40,7 @@ export class MonitorService {
   private listeners: Set<MetricsCallback> = new Set();
   private lastMetrics: SystemMetrics | null = null;
   private pollIntervalMs: number;
+  private contextCache: Map<string, number> = new Map();
 
   constructor(pollIntervalMs = 1000) {
     this.pollIntervalMs = pollIntervalMs;
@@ -107,13 +108,15 @@ export class MonitorService {
 
       const totalVram = vramPerModel.reduce((sum, m) => sum + m.sizeVram, 0);
 
-      // KV cache estimation: rough heuristic based on model architecture
-      // Real values would need model-specific arch info
-      const kvEstimates = running.map((m) => ({
-        name: m.name,
-        estimatedKvBytes: this.estimateKvCache(m),
-        kvCacheType: process.env.OLLAMA_KV_CACHE_TYPE || 'f16',
-        numCtx: 2048, // default, would be extracted from modelfile
+      // Resolve actual context length per running model (cached)
+      const kvEstimates = await Promise.all(running.map(async (m) => {
+        const numCtx = await this.resolveContextLength(m.name);
+        return {
+          name: m.name,
+          estimatedKvBytes: this.estimateKvCache(m, numCtx),
+          kvCacheType: process.env.OLLAMA_KV_CACHE_TYPE || 'f16',
+          numCtx,
+        };
       }));
 
       const metrics: SystemMetrics = {
@@ -131,17 +134,45 @@ export class MonitorService {
   }
 
   /**
-   * Rough KV cache size estimation.
-   * KV cache ≈ 2 * num_layers * num_heads * head_dim * num_ctx * bytes_per_element
-   * Without model arch details, we estimate from total model size.
+   * Resolve actual context length from Ollama model info.
+   * Caches results to avoid repeated /api/show calls.
    */
-  private estimateKvCache(model: RunningModel): number {
-    const paramStr = model.details.parameter_size; // e.g. "7B", "13B"
+  private async resolveContextLength(modelName: string): Promise<number> {
+    if (this.contextCache.has(modelName)) {
+      return this.contextCache.get(modelName)!;
+    }
+    try {
+      const info = await ollama.showModel(modelName);
+      const arch = parseModelArch(info);
+      let numCtx = arch?.contextLength || 0;
+
+      // Check modelfile parameters for num_ctx override
+      if (info.parameters) {
+        const match = info.parameters.match(/num_ctx\s+(\d+)/);
+        if (match) numCtx = parseInt(match[1], 10);
+      }
+
+      if (!numCtx) numCtx = 2048; // fallback
+      this.contextCache.set(modelName, numCtx);
+      return numCtx;
+    } catch {
+      return 2048;
+    }
+  }
+
+  /**
+   * KV cache size estimation scaled by actual context length.
+   * KV ≈ 2 * layers * heads_kv * head_dim * num_ctx * bytes_per_element
+   * Heuristic fallback: ~0.5GB per 7B params at f16 / 2048 ctx.
+   */
+  private estimateKvCache(model: RunningModel, numCtx: number): number {
+    const paramStr = model.details.parameter_size;
     const paramBillions = parseFloat(paramStr) || 7;
 
-    // Heuristic: KV cache at f16, 2048 ctx ≈ ~0.5GB per 7B params
+    // Scale baseline (512MB for 7B at 2048 ctx) by actual context
     const kvCacheType = process.env.OLLAMA_KV_CACHE_TYPE || 'f16';
-    const baseKvBytes = (paramBillions / 7) * 512 * 1024 * 1024; // 512MB baseline
+    const ctxScale = numCtx / 2048;
+    const baseKvBytes = (paramBillions / 7) * 512 * 1024 * 1024 * ctxScale;
 
     const multiplier: Record<string, number> = {
       f16: 1.0,

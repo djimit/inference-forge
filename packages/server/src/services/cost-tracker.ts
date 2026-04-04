@@ -59,18 +59,14 @@ export class CostTracker {
 
   recordUsage(sample: UsageSample): void {
     this.samples.push(sample);
-    // Persist to SQLite
-    database.saveAlert({
-      id: `cost-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    database.saveCostSample({
       timestamp: sample.timestamp,
-      severity: 'info',
-      category: 'cost',
-      title: `${sample.provider}/${sample.model}`,
-      message: `${sample.inputTokens} in / ${sample.outputTokens} out = $${sample.estimatedCostUsd.toFixed(4)}`,
+      provider: sample.provider,
       model: sample.model,
-      value: sample.estimatedCostUsd,
-      threshold: null,
-      acknowledged: false,
+      agent: sample.agent,
+      inputTokens: sample.inputTokens,
+      outputTokens: sample.outputTokens,
+      estimatedCostUsd: sample.estimatedCostUsd,
     });
   }
 

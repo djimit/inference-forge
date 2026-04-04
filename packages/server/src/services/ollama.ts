@@ -206,6 +206,47 @@ export class OllamaClient {
     }
   }
 
+  /**
+   * Pull a model with streaming progress.
+   * Yields progress events: { status, digest?, total?, completed? }
+   */
+  async pullModel(
+    name: string,
+    onProgress: (event: { status: string; digest?: string; total?: number; completed?: number }) => void
+  ): Promise<void> {
+    const url = `${this.baseUrl}/api/pull`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, stream: true }),
+    });
+
+    if (!res.ok || !res.body) {
+      throw new Error(`Pull failed: ${res.status} ${res.statusText}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          onProgress(event);
+        } catch { /* skip */ }
+      }
+    }
+  }
+
   /** Check if Ollama is reachable */
   async ping(): Promise<boolean> {
     try {

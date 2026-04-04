@@ -63,6 +63,27 @@ router.get('/models/:name/info', async (req, res) => {
   }
 });
 
+// -- Model Pull (streaming SSE) -------------------------------------
+
+router.post('/models/pull', async (req, res) => {
+  const { name } = req.body as { name: string };
+  if (!name) { res.status(400).json({ error: 'name is required' }); return; }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  try {
+    await ollama.pullModel(name, (event) => {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    });
+    res.write(`data: ${JSON.stringify({ status: 'success' })}\n\n`);
+  } catch (err) {
+    res.write(`data: ${JSON.stringify({ status: 'error', error: String(err) })}\n\n`);
+  }
+  res.end();
+});
+
 // -- Metrics --------------------------------------------------------
 
 router.get('/metrics', (_req, res) => {
@@ -453,6 +474,8 @@ router.post('/modelfile/generate-auto', async (req, res) => {
     gpuName: gpu?.name || 'CPU Only',
     cpuCores: snapshot.system.cpuCores,
     cpuPhysicalCores: snapshot.system.cpuPhysicalCores,
+    numaNodes: snapshot.system.numaNodes,
+    coresPerNuma: snapshot.system.coresPerNuma,
     pcieGeneration: snapshot.system.pcieGeneration,
     pcieBandwidthGBs: snapshot.system.pcieBandwidthGBs,
   };
@@ -610,6 +633,29 @@ router.post('/sessions/:id/message', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
+});
+
+// Streaming chat endpoint — sends tokens as SSE
+router.post('/sessions/:id/message/stream', async (req, res) => {
+  const { content } = req.body as { content: string };
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  orchestrator.sendMessageStream(
+    req.params.id,
+    content,
+    (token) => res.write(`data: ${JSON.stringify({ type: 'token', content: token })}\n\n`),
+    (fullResponse) => {
+      res.write(`data: ${JSON.stringify({ type: 'done', content: fullResponse })}\n\n`);
+      res.end();
+    },
+    (err) => {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: String(err) })}\n\n`);
+      res.end();
+    }
+  );
 });
 
 router.delete('/sessions/:id', (req, res) => {

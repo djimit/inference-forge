@@ -6,7 +6,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, statSync, createReadStream } from 'fs';
+import { existsSync, statSync, createReadStream, readFileSync } from 'fs';
 import { readdir } from 'fs/promises';
 import { join } from 'path';
 import { platform, homedir } from 'os';
@@ -237,9 +237,20 @@ export class IoProfiler {
               const tags = await readdir(tagsPath).catch(() => [] as string[]);
               for (const tag of tags) {
                 const fullName = `${lib}/${modelName}:${tag}`;
+                let sizeMb = 0;
+                try {
+                  const manifestPath = join(tagsPath, tag);
+                  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+                  const totalBytes = (manifest.layers || []).reduce(
+                    (sum: number, layer: { size?: number }) => sum + (layer.size || 0), 0
+                  );
+                  sizeMb = Math.round(totalBytes / (1024 * 1024));
+                } catch {
+                  // Manifest unreadable — leave at 0
+                }
                 modelStorage.push({
                   modelName: fullName,
-                  sizeMb: 0, // Would need manifest parsing for exact size
+                  sizeMb,
                   driveLetter,
                   driveType: modelDriveType,
                   recommendation: modelDriveType === 'hdd'
