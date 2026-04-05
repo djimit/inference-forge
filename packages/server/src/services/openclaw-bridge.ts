@@ -124,8 +124,12 @@ export class OpenClawBridge {
   /** Check if a model can serve a request right now */
   checkCapacity(modelId: string): CapacityResponse {
     const registry = modelRegistry.getSnapshot();
+    // Normalize OpenClaw model format (ollama/phi4-opt → phi4-opt)
+    const normalized = modelId.replace(/^(ollama|lmstudio|anthropic|openrouter)\//, '');
     const model = registry?.models.find((m) =>
-      m.backendModelId === modelId || m.id === modelId || m.name === modelId
+      m.backendModelId === modelId || m.backendModelId === normalized ||
+      m.backendModelId.startsWith(normalized) ||
+      m.id === modelId || m.name === modelId
     );
 
     if (!model) {
