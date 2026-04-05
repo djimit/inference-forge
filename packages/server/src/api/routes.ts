@@ -18,6 +18,12 @@ import { pressure } from '../services/pressure.js';
 import { database } from '../services/database.js';
 import { ioProfiler } from '../services/io-profiler.js';
 import { costTracker } from '../services/cost-tracker.js';
+import { lmstudio } from '../services/lmstudio.js';
+import { modelRegistry } from '../services/model-registry.js';
+import { storageAdvisor } from '../services/storage-advisor.js';
+import { perfProfiler, type ModelProfile } from '../services/perf-profiler.js';
+import { routeAdvisor, type RouteRequest } from '../services/route-advisor.js';
+import { systemOptimizer } from '../services/system-optimizer.js';
 
 export const router = Router();
 
@@ -699,4 +705,194 @@ router.post('/route', (req, res) => {
   const { content } = req.body as { content: string };
   const agent = orchestrator.routeMessage(content);
   res.json({ agent: agent || null });
+});
+
+// -- Multi-Backend: Registry ----------------------------------------
+
+router.get('/registry', (_req, res) => {
+  const snapshot = modelRegistry.getSnapshot();
+  if (!snapshot) {
+    res.status(503).json({ error: 'Registry not yet initialized' });
+    return;
+  }
+  res.json(snapshot);
+});
+
+router.post('/registry/refresh', async (_req, res) => {
+  try {
+    const snapshot = await modelRegistry.refresh();
+    res.json(snapshot);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.get('/registry/backends', (_req, res) => {
+  const snapshot = modelRegistry.getSnapshot();
+  res.json({ backends: snapshot?.backends || [] });
+});
+
+// -- Storage Advisor ------------------------------------------------
+
+router.get('/storage', async (_req, res) => {
+  try {
+    const report = await storageAdvisor.generateReport();
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// -- Performance Profiles -------------------------------------------
+
+router.get('/profiles', (_req, res) => {
+  res.json({ profiles: perfProfiler.getProfiles() });
+});
+
+router.get('/profiles/:backend/:modelId', (req, res) => {
+  const profile = perfProfiler.getProfile(
+    req.params.backend as any,
+    decodeURIComponent(req.params.modelId)
+  );
+  if (!profile) { res.status(404).json({ error: 'Profile not found' }); return; }
+  res.json(profile);
+});
+
+router.post('/profiles/run', async (req, res) => {
+  const { backend, modelId } = req.body as { backend: string; modelId: string };
+  if (!backend || !modelId) {
+    res.status(400).json({ error: 'backend and modelId are required' });
+    return;
+  }
+  try {
+    const profile = await perfProfiler.profileModel(backend as any, modelId);
+    res.json({ profile });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.post('/profiles/run-all', async (_req, res) => {
+  if (perfProfiler.isRunning()) {
+    res.status(409).json({ error: 'Profiling already in progress' });
+    return;
+  }
+
+  // Start async, return immediately
+  res.json({ started: true, message: 'Profiling all models. Check /api/profiles for results.' });
+
+  perfProfiler.profileAll().catch((err) => {
+    console.error('[API] profileAll error:', err);
+  });
+});
+
+router.get('/profiles/status', (_req, res) => {
+  res.json({ running: perfProfiler.isRunning() });
+});
+
+// -- Intelligent Route Advisor --------------------------------------
+
+router.post('/route/advise', (req, res) => {
+  const request = req.body as RouteRequest;
+  if (!request.taskType || !request.quality || !request.latency) {
+    res.status(400).json({ error: 'taskType, quality, and latency are required' });
+    return;
+  }
+  const recommendations = routeAdvisor.recommend(request);
+  res.json({ recommendations });
+});
+
+router.get('/route/policies', (_req, res) => {
+  res.json({ policies: routeAdvisor.getPolicies() });
+});
+
+router.post('/route/policies', (req, res) => {
+  routeAdvisor.addPolicy(req.body);
+  res.json({ success: true });
+});
+
+router.delete('/route/policies/:id', (req, res) => {
+  const removed = routeAdvisor.removePolicy(req.params.id);
+  res.json({ success: removed });
+});
+
+// -- System Optimizer -----------------------------------------------
+
+router.get('/system/optimize', async (_req, res) => {
+  try {
+    const report = await systemOptimizer.generateReport();
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// -- Multi-Backend: LM Studio Control -------------------------------
+
+router.get('/lmstudio/status', async (_req, res) => {
+  const running = await lmstudio.isServerRunning();
+  const models = await lmstudio.listModelsDetailed();
+  const loaded = running ? await lmstudio.listLoaded() : [];
+  res.json({
+    running,
+    url: lmstudio.getBaseUrl(),
+    modelCount: models.length,
+    loadedCount: loaded.length,
+    loaded,
+  });
+});
+
+router.post('/lmstudio/start', async (_req, res) => {
+  const success = await lmstudio.startServer();
+  res.json({ success, message: success ? 'LM Studio server started' : 'Failed to start LM Studio server' });
+});
+
+router.post('/lmstudio/stop', async (_req, res) => {
+  const success = await lmstudio.stopServer();
+  res.json({ success });
+});
+
+router.post('/lmstudio/load', async (req, res) => {
+  const { model } = req.body as { model: string };
+  if (!model) { res.status(400).json({ error: 'model is required' }); return; }
+  const success = await lmstudio.loadModel(model);
+  res.json({ success });
+});
+
+router.post('/lmstudio/unload', async (req, res) => {
+  const { model } = req.body as { model: string };
+  if (!model) { res.status(400).json({ error: 'model is required' }); return; }
+  const success = await lmstudio.unloadModel(model);
+  res.json({ success });
+});
+
+router.post('/lmstudio/chat', async (req, res) => {
+  const { model, messages, temperature, max_tokens } = req.body;
+  try {
+    const result = await lmstudio.chat(model, messages, { temperature, max_tokens });
+    res.json(result);
+  } catch (err) {
+    res.status(502).json({ error: String(err) });
+  }
+});
+
+// Streaming chat for LM Studio
+router.post('/lmstudio/chat/stream', async (req, res) => {
+  const { model, messages, temperature, max_tokens } = req.body;
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  try {
+    await lmstudio.chatStream(
+      model, messages,
+      (token) => res.write(`data: ${JSON.stringify({ type: 'token', content: token })}\n\n`),
+      { temperature, max_tokens }
+    );
+    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+  } catch (err) {
+    res.write(`data: ${JSON.stringify({ type: 'error', error: String(err) })}\n\n`);
+  }
+  res.end();
 });

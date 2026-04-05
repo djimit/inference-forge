@@ -91,6 +91,30 @@ export class DatabaseService {
 
       CREATE INDEX IF NOT EXISTS idx_cost_samples_ts ON cost_samples(timestamp);
       CREATE INDEX IF NOT EXISTS idx_cost_samples_provider ON cost_samples(provider);
+
+      CREATE TABLE IF NOT EXISTS model_profiles (
+        id TEXT PRIMARY KEY,
+        backend TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        parameter_size TEXT,
+        quantization TEXT,
+        architecture TEXT,
+        tok_s_gpu REAL,
+        tok_s_cpu REAL,
+        prompt_tok_s REAL,
+        first_token_ms REAL,
+        vram_usage_mb REAL,
+        ram_usage_mb REAL,
+        optimal_gpu_layers INTEGER,
+        optimal_threads INTEGER,
+        quality_proxy REAL,
+        max_context_tested INTEGER,
+        benchmarked_at INTEGER NOT NULL,
+        UNIQUE(backend, model_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_model_profiles_backend ON model_profiles(backend);
     `);
   }
 
@@ -215,6 +239,83 @@ export class DatabaseService {
         ...r,
         acknowledged: !!r.acknowledged,
       }));
+    } catch {
+      return [];
+    }
+  }
+
+  // -- Model Profile Methods ------------------------------------------
+
+  saveModelProfile(profile: {
+    id: string;
+    backend: string;
+    modelId: string;
+    displayName: string;
+    parameterSize?: string;
+    quantization?: string;
+    architecture?: string;
+    tokSGpu?: number;
+    tokSCpu?: number;
+    promptTokS?: number;
+    firstTokenMs?: number;
+    vramUsageMb?: number;
+    ramUsageMb?: number;
+    optimalGpuLayers?: number;
+    optimalThreads?: number;
+    qualityProxy?: number;
+    maxContextTested?: number;
+    benchmarkedAt: number;
+  }): void {
+    if (!this.enabled) return;
+    try {
+      this.db.prepare(`
+        INSERT OR REPLACE INTO model_profiles
+        (id, backend, model_id, display_name, parameter_size, quantization, architecture,
+         tok_s_gpu, tok_s_cpu, prompt_tok_s, first_token_ms, vram_usage_mb, ram_usage_mb,
+         optimal_gpu_layers, optimal_threads, quality_proxy, max_context_tested, benchmarked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        profile.id,
+        profile.backend,
+        profile.modelId,
+        profile.displayName,
+        profile.parameterSize || null,
+        profile.quantization || null,
+        profile.architecture || null,
+        profile.tokSGpu ?? null,
+        profile.tokSCpu ?? null,
+        profile.promptTokS ?? null,
+        profile.firstTokenMs ?? null,
+        profile.vramUsageMb ?? null,
+        profile.ramUsageMb ?? null,
+        profile.optimalGpuLayers ?? null,
+        profile.optimalThreads ?? null,
+        profile.qualityProxy ?? null,
+        profile.maxContextTested ?? null,
+        profile.benchmarkedAt
+      );
+    } catch (err) {
+      console.error('[Database] saveModelProfile error:', err);
+    }
+  }
+
+  getModelProfile(backend: string, modelId: string): any | null {
+    if (!this.enabled) return null;
+    try {
+      return this.db.prepare(
+        'SELECT * FROM model_profiles WHERE backend = ? AND model_id = ?'
+      ).get(backend, modelId) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  getAllModelProfiles(): any[] {
+    if (!this.enabled) return [];
+    try {
+      return this.db.prepare(
+        'SELECT * FROM model_profiles ORDER BY benchmarked_at DESC'
+      ).all();
     } catch {
       return [];
     }

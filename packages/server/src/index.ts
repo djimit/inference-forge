@@ -14,6 +14,7 @@ import { alerts } from './services/alerts.js';
 import { pressure } from './services/pressure.js';
 import { database } from './services/database.js';
 import { benchmark } from './services/benchmark.js';
+import { modelRegistry } from './services/model-registry.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const app = express();
@@ -33,6 +34,7 @@ setupWebSocket(server);
 monitor.start();
 hardware.start();
 pressure.start();
+modelRegistry.start();
 
 // Wire alerts into monitor cycle
 monitor.subscribe((metrics) => {
@@ -74,7 +76,7 @@ benchmark.subscribeProgress((message, progress) => {
 server.listen(PORT, () => {
   console.log(`
   +---------------------------------------+
-  |      Inference Forge v0.5.0           |
+  |      Inference Forge v0.3.0           |
   |  http://localhost:${PORT}               |
   |  WebSocket: ws://localhost:${PORT}/ws    |
   +---------------------------------------+
@@ -86,6 +88,7 @@ process.on('SIGINT', () => {
   console.log('\nShutting down...');
   monitor.stop();
   hardware.stop();
+  modelRegistry.stop();
   database.close();
   server.close();
   process.exit(0);

@@ -15,6 +15,7 @@ import { HardwarePanel } from './HardwarePanel';
 import { TemplateGallery } from './TemplateGallery';
 import { AgentPanel } from './AgentPanel';
 import { ModelPull } from './ModelPull';
+import { BackendPanel } from './BackendPanel';
 
 type Tab = 'monitor' | 'benchmark' | 'modelfile' | 'analysis' | 'agents';
 
@@ -150,6 +151,7 @@ export function Dashboard() {
         {activeTab === 'analysis' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <IoProfilePanel />
+            <BackendPanel />
           </div>
         )}
 
