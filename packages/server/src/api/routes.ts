@@ -24,6 +24,8 @@ import { storageAdvisor } from '../services/storage-advisor.js';
 import { perfProfiler, type ModelProfile } from '../services/perf-profiler.js';
 import { routeAdvisor, type RouteRequest } from '../services/route-advisor.js';
 import { systemOptimizer } from '../services/system-optimizer.js';
+import { openclawBridge } from '../services/openclaw-bridge.js';
+import { hivemindBridge } from '../services/hivemind-bridge.js';
 
 export const router = Router();
 
@@ -822,6 +824,60 @@ router.get('/system/optimize', async (_req, res) => {
   try {
     const report = await systemOptimizer.generateReport();
     res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// -- OpenClaw Bridge ------------------------------------------------
+
+router.get('/openclaw/agents', (_req, res) => {
+  res.json({ agents: openclawBridge.getAgents() });
+});
+
+router.post('/openclaw/usage', (req, res) => {
+  const { agentId, tokens, costUsd } = req.body;
+  if (!agentId) { res.status(400).json({ error: 'agentId required' }); return; }
+  openclawBridge.recordAgentUsage(agentId, tokens || 0, costUsd || 0);
+  res.json({ success: true });
+});
+
+router.get('/openclaw/capacity/:model', (req, res) => {
+  res.json(openclawBridge.checkCapacity(decodeURIComponent(req.params.model)));
+});
+
+router.get('/openclaw/recommendations', (_req, res) => {
+  res.json({ recommendations: openclawBridge.getRecommendations() });
+});
+
+router.get('/openclaw/advise/:agentId', (req, res) => {
+  res.json(openclawBridge.adviseForAgent(req.params.agentId));
+});
+
+// -- Hivemind Bridge ------------------------------------------------
+
+router.post('/hivemind/publish', async (_req, res) => {
+  try {
+    const result = await hivemindBridge.publishAll();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.post('/hivemind/publish/profiles', async (_req, res) => {
+  try {
+    const result = await hivemindBridge.publishProfiles();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.post('/hivemind/publish/hardware', async (_req, res) => {
+  try {
+    const ok = await hivemindBridge.publishHardwareSnapshot();
+    res.json({ success: ok });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
