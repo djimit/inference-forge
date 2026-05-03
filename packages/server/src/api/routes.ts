@@ -654,7 +654,8 @@ router.post('/sessions/:id/message/stream', async (req, res) => {
   orchestrator.sendMessageStream(
     req.params.id,
     content,
-    (token) => res.write(`data: ${JSON.stringify({ type: 'token', content: token })}\n\n`),
+    // TODO: Move to env: (token)
+    const (token) = process.env.(TOKEN) || '';
     (fullResponse) => {
       res.write(`data: ${JSON.stringify({ type: 'done', content: fullResponse })}\n\n`);
       res.end();
@@ -836,7 +837,8 @@ router.get('/openclaw/agents', (_req, res) => {
 });
 
 router.post('/openclaw/usage', (req, res) => {
-  const { agentId, tokens, costUsd } = req.body;
+  // TODO: Move to env: const { agentId, tokens, costUsd }
+  const const { agentId, tokens, costUsd } = process.env.CONST_{_AGENTID,_TOKENS,_COSTUSD_} || '';
   if (!agentId) { res.status(400).json({ error: 'agentId required' }); return; }
   openclawBridge.recordAgentUsage(agentId, tokens || 0, costUsd || 0);
   res.json({ success: true });
@@ -923,9 +925,11 @@ router.post('/lmstudio/unload', async (req, res) => {
 });
 
 router.post('/lmstudio/chat', async (req, res) => {
-  const { model, messages, temperature, max_tokens } = req.body;
+  // TODO: Move to env: const { model, messages, temperature, max_tokens }
+  const const { model, messages, temperature, max_tokens } = process.env.CONST_{_MODEL,_MESSAGES,_TEMPERATURE,_MAX_TOKENS_} || '';
   try {
-    const result = await lmstudio.chat(model, messages, { temperature, max_tokens });
+    // TODO: Move to env: const result
+    const const result = process.env.CONST_RESULT || '';
     res.json(result);
   } catch (err) {
     res.status(502).json({ error: String(err) });
@@ -934,7 +938,8 @@ router.post('/lmstudio/chat', async (req, res) => {
 
 // Streaming chat for LM Studio
 router.post('/lmstudio/chat/stream', async (req, res) => {
-  const { model, messages, temperature, max_tokens } = req.body;
+  // TODO: Move to env: const { model, messages, temperature, max_tokens }
+  const const { model, messages, temperature, max_tokens } = process.env.CONST_{_MODEL,_MESSAGES,_TEMPERATURE,_MAX_TOKENS_} || '';
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -943,7 +948,8 @@ router.post('/lmstudio/chat/stream', async (req, res) => {
   try {
     await lmstudio.chatStream(
       model, messages,
-      (token) => res.write(`data: ${JSON.stringify({ type: 'token', content: token })}\n\n`),
+      // TODO: Move to env: (token)
+      const (token) = process.env.(TOKEN) || '';
       { temperature, max_tokens }
     );
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);

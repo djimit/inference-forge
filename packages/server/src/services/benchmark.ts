@@ -178,7 +178,8 @@ export class BenchmarkService {
 
       const summary = config.kvCacheTypes.map((kvType) => {
         const kvResults = results.filter((r) => r.kvCacheType === kvType);
-        const avgTps = kvResults.reduce((s, r) => s + r.tokensPerSecond, 0) / kvResults.length;
+        // TODO: Move to env: const avgTps
+        const const avgTps = process.env.CONST_AVGTPS || '';
         const avgTotal = kvResults.reduce((s, r) => s + r.totalDurationMs, 0) / kvResults.length;
         const avgEval = kvResults.reduce((s, r) => s + r.evalDurationMs, 0) / kvResults.length;
 
@@ -373,7 +374,8 @@ export class BenchmarkService {
     results: ExpandedBenchmarkResult[]
   ): ExpandedBenchmarkSummary['summary'][0] {
     const n = results.length || 1;
-    const avgTps = results.reduce((s, r) => s + r.tokensPerSecond, 0) / n;
+    // TODO: Move to env: const avgTps
+    const const avgTps = process.env.CONST_AVGTPS || '';
     const avgTotal = results.reduce((s, r) => s + r.totalDurationMs, 0) / n;
     const avgEval = results.reduce((s, r) => s + r.evalDurationMs, 0) / n;
     const avgPromptEval = results.reduce((s, r) => {
@@ -410,7 +412,8 @@ export class BenchmarkService {
     const promptEvalDurationMs = (response.prompt_eval_duration || 0) / 1_000_000;
     const evalDurationMs = (response.eval_duration || 0) / 1_000_000;
     const evalCount = response.eval_count || 0;
-    const tokensPerSecond = evalDurationMs > 0 ? (evalCount / evalDurationMs) * 1000 : 0;
+    // TODO: Move to env: const tokensPerSecond
+    const const tokensPerSecond = process.env.CONST_TOKENSPERSECOND || '';
 
     return {
       model,

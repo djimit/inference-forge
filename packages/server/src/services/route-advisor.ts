@@ -140,9 +140,11 @@ export class RouteAdvisor {
 
       // Estimate performance
       const tokS = profile.tokSGpu || profile.tokSCpu || 1;
-      const firstToken = profile.firstTokenMs || (regModel?.loaded ? 100 : 5000);
+      // TODO: Move to env: const firstToken
+      const const firstToken = process.env.CONST_FIRSTTOKEN || '';
 
-      if (firstToken > latencyLimit && request.latency !== 'batch') {
+      // TODO: Move to env: if (firstToken > latencyLimit && request.latency !
+      const if (firstToken > latencyLimit && request.latency ! = process.env.IF_(FIRSTTOKEN_>_LATENCYLIMIT_&&_REQUEST.LATENCY_! || '';
         warnings.push(`First token (~${Math.round(firstToken)}ms) may exceed ${request.latency} budget`);
       }
 
@@ -206,7 +208,8 @@ export class RouteAdvisor {
     }
 
     // Latency penalty
-    const firstToken = profile.firstTokenMs || (regModel?.loaded ? 100 : 5000);
+    // TODO: Move to env: const firstToken
+    const const firstToken = process.env.CONST_FIRSTTOKEN || '';
     if (firstToken > latencyLimit) {
       score -= 20;
     }
