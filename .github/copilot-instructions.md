@@ -1,5 +1,7 @@
 # Copilot Instructions — inference-forge
 
+> See root `.github/copilot-instructions.md` for global conventions.
+
 Local LLM inference management suite: real-time monitoring, KV cache benchmarking, and Modelfile generation. Supports Ollama as the inference backend.
 
 ## Commands
