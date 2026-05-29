@@ -25,5 +25,8 @@
     "node": ">=18.0.0"
   },
   "author": "DjimIT B.V.",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "recharts": "^3.8.1"
+  }
 }

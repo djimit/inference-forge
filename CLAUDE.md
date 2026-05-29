@@ -1,8 +1,12 @@
-# Copilot Instructions — inference-forge
+# ⚠️ DEPRECATED — See `.github/copilot-instructions.md`
 
-> See root `.github/copilot-instructions.md` for global conventions.
+This file is kept for backward compatibility. The canonical project instructions are now in `.github/copilot-instructions.md`. Please update that file instead.
 
-Local LLM inference management suite: real-time monitoring, KV cache benchmarking, and Modelfile generation. Supports Ollama as the inference backend.
+---
+
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Commands
 
@@ -19,7 +23,7 @@ npm run dev:dashboard  # frontend only (vite)
 npm run build          # compiles server (tsc) + dashboard (tsc + vite)
 npm start              # runs compiled server only
 
-# Type checking (no linter or test framework yet — planned for v0.2)
+# Type checking (no linter or test framework yet)
 cd packages/server && npx tsc --noEmit
 cd packages/dashboard && npx tsc --noEmit
 ```
@@ -28,7 +32,7 @@ Requires Ollama running on `localhost:11434` (or `OLLAMA_HOST` env var).
 
 ## Architecture
 
-Monorepo (`npm workspaces`). The backend (`packages/server`) is the single source of truth — it polls Ollama every 1s and fans metrics out over WebSocket at `/ws`. The React dashboard (`packages/dashboard`) never calls Ollama directly; it only consumes the WebSocket stream.
+Monorepo (`npm workspaces`). The backend is the single source of truth — it polls Ollama every 1s and fans metrics out over WebSocket. The dashboard never calls Ollama directly; it only consumes the WebSocket stream.
 
 ```
 packages/server/src/
@@ -36,7 +40,7 @@ packages/server/src/
 ├── api/routes.ts         # 60+ REST endpoints (health, models, metrics, benchmark, modelfile, agents)
 ├── services/
 │   ├── ollama.ts         # Typed Ollama API client
-│   ├── monitor.ts        # 1s polling loop, emits SystemMetrics
+│   ├── monitor.ts        # 1s polling loop, emits SystemMetrics via callbacks
 │   ├── hardware.ts       # GPU detection (nvidia-smi / rocm-smi)
 │   ├── benchmark.ts      # KV cache benchmarking (f16/q8_0/q4_0)
 │   ├── modelfile.ts      # Hardware-aware Modelfile generator
@@ -59,11 +63,12 @@ packages/dashboard/src/
 
 ## Key Details
 
-- **TypeScript strict mode throughout** — no `any` in production code.
-- **Benchmark results stored in `globalThis`** in `api/routes.ts` — lost on server restart, intentional.
-- **KV cache estimates are calculated, not measured** — `monitor.ts` computes them from model architecture.
+- **TypeScript strict mode throughout** — no `any` in production code. No linter or test framework yet (planned for v0.2).
+- **Benchmark results stored in `globalThis`** in `api/routes.ts` — lost on server restart, intentional for now.
+- **KV cache estimates are calculated, not measured** — monitor.ts computes them from model architecture, not live profiling.
 - **Agent/Session/Workflow endpoints are scaffolded** (v0.5 roadmap) but not fully wired to UI.
 - **Vite dev server proxies `/api/*` and `/ws/*` to port 3001** — frontend dev server must be started alongside backend.
+- **Custom Tailwind palette** (`forge-bg`, `forge-card`, `forge-accent`, etc.) defined in `packages/dashboard/tailwind.config.js`.
 - **Server uses ESM** (`"type": "module"`) — import paths need `.js` extensions in compiled output.
 - **No auth** — all endpoints are open; designed for localhost use only.
 
@@ -72,15 +77,6 @@ packages/dashboard/src/
 Copy `.env.example` to `.env` in `packages/server/`:
 - `PORT` — default `3001`
 - `OLLAMA_HOST` — default `http://localhost:11434`
-
-## Browser Testing
-
-Playwright MCP is configured in `.vscode/mcp.json`. Install first:
-```bash
-npm install -g @playwright/mcp
-```
-
-## Environment
 
 KV cache quantization is configured on the Ollama side, not here:
 ```bash
