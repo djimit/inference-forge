@@ -111,6 +111,7 @@ jobs:
       
       - name: Generate summary
         run: |
+          mkdir -p ci-results
           python3 -c "
           import json, os, glob
           results = {}
