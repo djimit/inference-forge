@@ -16,6 +16,7 @@ import { TemplateGallery } from './TemplateGallery';
 import { AgentPanel } from './AgentPanel';
 import { ModelPull } from './ModelPull';
 import { BackendPanel } from './BackendPanel';
+import { APP_VERSION } from '../config/version';
 
 type Tab = 'monitor' | 'benchmark' | 'modelfile' | 'analysis' | 'agents';
 
@@ -56,7 +57,7 @@ export function Dashboard() {
               <span className="text-forge-text">Forge</span>
             </div>
             <span className="text-xs bg-forge-accent/20 text-forge-accent px-2 py-0.5 rounded-full">
-              v0.2.0
+              v{APP_VERSION}
             </span>
           </div>
           <div className="flex items-center gap-2">

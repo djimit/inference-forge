@@ -22,6 +22,9 @@ npm install
 # Start development (backend + frontend)
 npm run dev
 
+# Verify backend health
+curl http://127.0.0.1:3001/api/health
+
 # Open http://localhost:3000
 ```
 
@@ -109,7 +112,9 @@ npm install
 npm run dev
 ```
 
-The backend runs on `http://localhost:3001` and the dashboard on `http://localhost:3000` with hot reload enabled for both.
+The backend binds to `127.0.0.1:3001` by default and the dashboard runs on `http://localhost:3000` with hot reload enabled for both. Set `HOST` explicitly only on trusted networks; the local-first server does not provide authentication yet and restricts browser CORS to localhost origins.
+
+Use `npm run typecheck` to run TypeScript checks for both workspaces without emitting build artifacts.
 
 ### Project Structure
 

@@ -11,6 +11,7 @@ import { hardware } from '../services/hardware.js';
 import { throughput } from '../services/throughput.js';
 import { alerts } from '../services/alerts.js';
 import { perplexity } from '../services/perplexity.js';
+import { benchmarkState } from '../services/benchmark-state.js';
 import { promptLibrary } from '../services/prompt-library.js';
 import { modelfileLibrary } from '../services/modelfile-library.js';
 import { orchestrator, type AgentConfig, type Workflow } from '../services/orchestrator.js';
@@ -18,16 +19,104 @@ import { pressure } from '../services/pressure.js';
 import { database } from '../services/database.js';
 import { ioProfiler } from '../services/io-profiler.js';
 import { costTracker } from '../services/cost-tracker.js';
-import { lmstudio } from '../services/lmstudio.js';
-import { modelRegistry } from '../services/model-registry.js';
+import { lmstudio, type LmsChatMessage } from '../services/lmstudio.js';
+import { modelRegistry, type Backend } from '../services/model-registry.js';
 import { storageAdvisor } from '../services/storage-advisor.js';
 import { perfProfiler, type ModelProfile } from '../services/perf-profiler.js';
 import { routeAdvisor, type RouteRequest } from '../services/route-advisor.js';
 import { systemOptimizer } from '../services/system-optimizer.js';
 import { openclawBridge } from '../services/openclaw-bridge.js';
 import { hivemindBridge } from '../services/hivemind-bridge.js';
+import { APP_VERSION } from '../config/version.js';
 
 export const router = Router();
+
+type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+interface MessageBody {
+  content: string;
+}
+
+interface OpenClawUsageBody {
+  agentId: string;
+  tokens: number;
+  costUsd: number;
+}
+
+interface LmStudioChatBody {
+  model: string;
+  messages: LmsChatMessage[];
+  temperature?: number;
+  max_tokens?: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseMessageBody(body: unknown): ValidationResult<MessageBody> {
+  if (!isRecord(body) || typeof body.content !== 'string' || body.content.trim().length === 0) {
+    return { ok: false, error: 'content is required' };
+  }
+  return { ok: true, value: { content: body.content } };
+}
+
+function parseOpenClawUsageBody(body: unknown): ValidationResult<OpenClawUsageBody> {
+  if (!isRecord(body) || typeof body.agentId !== 'string' || body.agentId.trim().length === 0) {
+    return { ok: false, error: 'agentId required' };
+  }
+  const tokens = typeof body.tokens === 'number' && Number.isFinite(body.tokens) ? body.tokens : 0;
+  const costUsd = typeof body.costUsd === 'number' && Number.isFinite(body.costUsd) ? body.costUsd : 0;
+  if (tokens < 0 || costUsd < 0) {
+    return { ok: false, error: 'tokens and costUsd must be non-negative numbers' };
+  }
+  return { ok: true, value: { agentId: body.agentId, tokens, costUsd } };
+}
+
+function parseLmStudioChatBody(body: unknown): ValidationResult<LmStudioChatBody> {
+  if (!isRecord(body) || typeof body.model !== 'string' || body.model.trim().length === 0) {
+    return { ok: false, error: 'model is required' };
+  }
+  if (!Array.isArray(body.messages) || body.messages.length === 0) {
+    return { ok: false, error: 'messages must be a non-empty array' };
+  }
+
+  const messages: LmsChatMessage[] = [];
+  for (const message of body.messages) {
+    if (!isRecord(message)) return { ok: false, error: 'messages must contain objects' };
+    if (message.role !== 'system' && message.role !== 'user' && message.role !== 'assistant') {
+      return { ok: false, error: 'message role must be system, user, or assistant' };
+    }
+    if (typeof message.content !== 'string') {
+      return { ok: false, error: 'message content must be a string' };
+    }
+    messages.push({ role: message.role, content: message.content });
+  }
+
+  const temperature = typeof body.temperature === 'number' && Number.isFinite(body.temperature)
+    ? body.temperature
+    : undefined;
+  const maxTokens = typeof body.max_tokens === 'number' && Number.isFinite(body.max_tokens)
+    ? body.max_tokens
+    : undefined;
+
+  if (temperature !== undefined && (temperature < 0 || temperature > 2)) {
+    return { ok: false, error: 'temperature must be between 0 and 2' };
+  }
+  if (maxTokens !== undefined && (maxTokens < 1 || maxTokens > 32768)) {
+    return { ok: false, error: 'max_tokens must be between 1 and 32768' };
+  }
+
+  return { ok: true, value: { model: body.model, messages, temperature, max_tokens: maxTokens } };
+}
+
+function isBackend(value: string): value is Backend {
+  return value === 'ollama' || value === 'lmstudio';
+}
+
+function writeSse(res: { write: (chunk: string) => void }, payload: unknown): void {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
 
 // -- Health ---------------------------------------------------------
 
@@ -35,7 +124,7 @@ router.get('/health', async (_req, res) => {
   const ollamaOnline = await ollama.ping();
   res.json({
     status: 'ok',
-    version: '0.5.0',
+    version: APP_VERSION,
     ollama: ollamaOnline ? 'connected' : 'disconnected',
     ollamaUrl: ollama.getBaseUrl(),
     timestamp: Date.now(),
@@ -212,14 +301,14 @@ router.post('/benchmark/run', async (req, res) => {
 
   try {
     const result = await benchmark.run(config);
-    (globalThis as any).__lastBenchmarkResult = result;
+    benchmarkState.setBenchmarkResult(result);
   } catch (err) {
     console.error('[Benchmark] Error:', err);
   }
 });
 
 router.get('/benchmark/result', (_req, res) => {
-  const result = (globalThis as any).__lastBenchmarkResult;
+  const result = benchmarkState.getBenchmarkResult();
   if (!result) {
     res.status(404).json({ error: 'No benchmark result available' });
     return;
@@ -243,15 +332,14 @@ router.post('/benchmark/run-expanded', async (req, res) => {
 
   try {
     const result = await benchmark.runExpanded(config);
-    (globalThis as any).__lastExpandedBenchmarkResult = result;
-    (globalThis as any).__lastBenchmarkResult = result;
+    benchmarkState.setExpandedBenchmarkResult(result);
   } catch (err) {
     console.error('[Benchmark] Expanded error:', err);
   }
 });
 
 router.get('/benchmark/result-expanded', (_req, res) => {
-  const result = (globalThis as any).__lastExpandedBenchmarkResult;
+  const result = benchmarkState.getExpandedBenchmarkResult();
   if (!result) {
     res.status(404).json({ error: 'No expanded benchmark result available' });
     return;
@@ -260,7 +348,7 @@ router.get('/benchmark/result-expanded', (_req, res) => {
 });
 
 router.get('/benchmark/export/:format', (req, res) => {
-  const result = (globalThis as any).__lastBenchmarkResult;
+  const result = benchmarkState.getBenchmarkResult();
   if (!result) {
     res.status(404).json({ error: 'No benchmark result to export' });
     return;
@@ -645,23 +733,25 @@ router.post('/sessions/:id/message', async (req, res) => {
 
 // Streaming chat endpoint — sends tokens as SSE
 router.post('/sessions/:id/message/stream', async (req, res) => {
-  const { content } = req.body as { content: string };
+  const parsed = parseMessageBody(req.body);
+  if (!parsed.ok) { res.status(400).json({ error: parsed.error }); return; }
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  orchestrator.sendMessageStream(
+  await orchestrator.sendMessageStream(
     req.params.id,
-    content,
-    // TODO: Move to env: (token)
-    const (token) = process.env.(TOKEN) || '';
+    parsed.value.content,
+    (token) => {
+      writeSse(res, { type: 'token', content: token });
+    },
     (fullResponse) => {
-      res.write(`data: ${JSON.stringify({ type: 'done', content: fullResponse })}\n\n`);
+      writeSse(res, { type: 'done', content: fullResponse });
       res.end();
     },
     (err) => {
-      res.write(`data: ${JSON.stringify({ type: 'error', error: String(err) })}\n\n`);
+      writeSse(res, { type: 'error', error: String(err) });
       res.end();
     }
   );
@@ -753,8 +843,12 @@ router.get('/profiles', (_req, res) => {
 });
 
 router.get('/profiles/:backend/:modelId', (req, res) => {
+  if (!isBackend(req.params.backend)) {
+    res.status(400).json({ error: 'backend must be ollama or lmstudio' });
+    return;
+  }
   const profile = perfProfiler.getProfile(
-    req.params.backend as any,
+    req.params.backend,
     decodeURIComponent(req.params.modelId)
   );
   if (!profile) { res.status(404).json({ error: 'Profile not found' }); return; }
@@ -767,8 +861,12 @@ router.post('/profiles/run', async (req, res) => {
     res.status(400).json({ error: 'backend and modelId are required' });
     return;
   }
+  if (!isBackend(backend)) {
+    res.status(400).json({ error: 'backend must be ollama or lmstudio' });
+    return;
+  }
   try {
-    const profile = await perfProfiler.profileModel(backend as any, modelId);
+    const profile = await perfProfiler.profileModel(backend, modelId);
     res.json({ profile });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -837,10 +935,10 @@ router.get('/openclaw/agents', (_req, res) => {
 });
 
 router.post('/openclaw/usage', (req, res) => {
-  // TODO: Move to env: const { agentId, tokens, costUsd }
-  const const { agentId, tokens, costUsd } = process.env.CONST_{_AGENTID,_TOKENS,_COSTUSD_} || '';
-  if (!agentId) { res.status(400).json({ error: 'agentId required' }); return; }
-  openclawBridge.recordAgentUsage(agentId, tokens || 0, costUsd || 0);
+  const parsed = parseOpenClawUsageBody(req.body);
+  if (!parsed.ok) { res.status(400).json({ error: parsed.error }); return; }
+  const { agentId, tokens, costUsd } = parsed.value;
+  openclawBridge.recordAgentUsage(agentId, tokens, costUsd);
   res.json({ success: true });
 });
 
@@ -925,11 +1023,11 @@ router.post('/lmstudio/unload', async (req, res) => {
 });
 
 router.post('/lmstudio/chat', async (req, res) => {
-  // TODO: Move to env: const { model, messages, temperature, max_tokens }
-  const const { model, messages, temperature, max_tokens } = process.env.CONST_{_MODEL,_MESSAGES,_TEMPERATURE,_MAX_TOKENS_} || '';
+  const parsed = parseLmStudioChatBody(req.body);
+  if (!parsed.ok) { res.status(400).json({ error: parsed.error }); return; }
+  const { model, messages, temperature, max_tokens } = parsed.value;
   try {
-    // TODO: Move to env: const result
-    const const result = process.env.CONST_RESULT || '';
+    const result = await lmstudio.chat(model, messages, { temperature, max_tokens });
     res.json(result);
   } catch (err) {
     res.status(502).json({ error: String(err) });
@@ -938,8 +1036,9 @@ router.post('/lmstudio/chat', async (req, res) => {
 
 // Streaming chat for LM Studio
 router.post('/lmstudio/chat/stream', async (req, res) => {
-  // TODO: Move to env: const { model, messages, temperature, max_tokens }
-  const const { model, messages, temperature, max_tokens } = process.env.CONST_{_MODEL,_MESSAGES,_TEMPERATURE,_MAX_TOKENS_} || '';
+  const parsed = parseLmStudioChatBody(req.body);
+  if (!parsed.ok) { res.status(400).json({ error: parsed.error }); return; }
+  const { model, messages, temperature, max_tokens } = parsed.value;
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -948,13 +1047,14 @@ router.post('/lmstudio/chat/stream', async (req, res) => {
   try {
     await lmstudio.chatStream(
       model, messages,
-      // TODO: Move to env: (token)
-      const (token) = process.env.(TOKEN) || '';
+      (token) => {
+        writeSse(res, { type: 'token', content: token });
+      },
       { temperature, max_tokens }
     );
-    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+    writeSse(res, { type: 'done' });
   } catch (err) {
-    res.write(`data: ${JSON.stringify({ type: 'error', error: String(err) })}\n\n`);
+    writeSse(res, { type: 'error', error: String(err) });
   }
   res.end();
 });
