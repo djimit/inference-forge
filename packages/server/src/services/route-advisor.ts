@@ -6,7 +6,7 @@
 
 import { perfProfiler, type ModelProfile } from './perf-profiler.js';
 import { modelRegistry, type Backend } from './model-registry.js';
-import { pressure } from './pressure.js';
+import { pressure, type ResourcePressure } from './pressure.js';
 
 // -- Types ----------------------------------------------------------
 
@@ -138,13 +138,10 @@ export class RouteAdvisor {
         }
       }
 
-      // Estimate performance
       const tokS = profile.tokSGpu || profile.tokSCpu || 1;
-      // TODO: Move to env: const firstToken
-      const const firstToken = process.env.CONST_FIRSTTOKEN || '';
+      const firstToken = estimateFirstTokenMs(profile);
 
-      // TODO: Move to env: if (firstToken > latencyLimit && request.latency !
-      const if (firstToken > latencyLimit && request.latency ! = process.env.IF_(FIRSTTOKEN_>_LATENCYLIMIT_&&_REQUEST.LATENCY_! || '';
+      if (firstToken > latencyLimit && request.latency !== 'batch') {
         warnings.push(`First token (~${Math.round(firstToken)}ms) may exceed ${request.latency} budget`);
       }
 
@@ -168,7 +165,7 @@ export class RouteAdvisor {
     request: RouteRequest,
     affinityArchs: string[],
     latencyLimit: number,
-    pressureState: any
+    pressureState: ResourcePressure | null
   ): number {
     let score = 50; // baseline
 
@@ -207,9 +204,7 @@ export class RouteAdvisor {
       score += request.latency === 'realtime' ? 20 : request.latency === 'interactive' ? 10 : 2;
     }
 
-    // Latency penalty
-    // TODO: Move to env: const firstToken
-    const const firstToken = process.env.CONST_FIRSTTOKEN || '';
+    const firstToken = estimateFirstTokenMs(profile);
     if (firstToken > latencyLimit) {
       score -= 20;
     }
@@ -275,6 +270,12 @@ export class RouteAdvisor {
     this.policies = this.policies.filter((p) => p.id !== id);
     return this.policies.length < before;
   }
+}
+
+function estimateFirstTokenMs(profile: ModelProfile): number {
+  if (profile.firstTokenMs !== null) return profile.firstTokenMs;
+  const tokS = profile.tokSGpu || profile.tokSCpu || 0;
+  return tokS > 0 ? Math.round(1000 / tokS) : Infinity;
 }
 
 export const routeAdvisor = new RouteAdvisor();

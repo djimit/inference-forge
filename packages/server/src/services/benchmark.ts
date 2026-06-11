@@ -92,6 +92,7 @@ export interface ExpandedBenchmarkSummary {
 }
 
 type ProgressCallback = (message: string, progress: number) => void;
+type ExpandedParameterKey = 'numGpu' | 'numThread' | 'numCtx' | 'numBatch';
 
 // -- Standard benchmark prompts -------------------------------------
 
@@ -178,8 +179,7 @@ export class BenchmarkService {
 
       const summary = config.kvCacheTypes.map((kvType) => {
         const kvResults = results.filter((r) => r.kvCacheType === kvType);
-        // TODO: Move to env: const avgTps
-        const const avgTps = process.env.CONST_AVGTPS || '';
+        const avgTps = average(kvResults.map((r) => r.tokensPerSecond));
         const avgTotal = kvResults.reduce((s, r) => s + r.totalDurationMs, 0) / kvResults.length;
         const avgEval = kvResults.reduce((s, r) => s + r.evalDurationMs, 0) / kvResults.length;
 
@@ -328,7 +328,7 @@ export class BenchmarkService {
     };
     const mode = modeMap[paramName] || 'kv-cache';
 
-    const metaKey: Record<string, keyof ExpandedBenchmarkResult> = {
+    const metaKey: Record<string, ExpandedParameterKey> = {
       num_gpu: 'numGpu',
       num_thread: 'numThread',
       num_ctx: 'numCtx',
@@ -350,8 +350,9 @@ export class BenchmarkService {
             mode,
             run: run + 1,
           };
-          if (metaKey[paramName]) {
-            (expanded as any)[metaKey[paramName]] = value;
+          const key = metaKey[paramName];
+          if (key) {
+            setExpandedParameter(expanded, key, value);
           }
           results.push(expanded);
         }
@@ -360,7 +361,7 @@ export class BenchmarkService {
 
     const summaryItems = steps.map((value) => {
       const key = metaKey[paramName];
-      const filtered = results.filter((r) => (r as any)[key] === value);
+      const filtered = results.filter((r) => key ? r[key] === value : false);
       return this.buildSummaryItem(`${paramName}=${value}`, paramName, value, filtered);
     });
 
@@ -374,8 +375,7 @@ export class BenchmarkService {
     results: ExpandedBenchmarkResult[]
   ): ExpandedBenchmarkSummary['summary'][0] {
     const n = results.length || 1;
-    // TODO: Move to env: const avgTps
-    const const avgTps = process.env.CONST_AVGTPS || '';
+    const avgTps = average(results.map((r) => r.tokensPerSecond));
     const avgTotal = results.reduce((s, r) => s + r.totalDurationMs, 0) / n;
     const avgEval = results.reduce((s, r) => s + r.evalDurationMs, 0) / n;
     const avgPromptEval = results.reduce((s, r) => {
@@ -412,8 +412,7 @@ export class BenchmarkService {
     const promptEvalDurationMs = (response.prompt_eval_duration || 0) / 1_000_000;
     const evalDurationMs = (response.eval_duration || 0) / 1_000_000;
     const evalCount = response.eval_count || 0;
-    // TODO: Move to env: const tokensPerSecond
-    const const tokensPerSecond = process.env.CONST_TOKENSPERSECOND || '';
+    const tokensPerSecond = evalDurationMs > 0 ? evalCount / (evalDurationMs / 1000) : 0;
 
     return {
       model,
@@ -430,6 +429,19 @@ export class BenchmarkService {
       timestamp: Date.now(),
     };
   }
+}
+
+function average(values: number[]): number {
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function setExpandedParameter(
+  result: ExpandedBenchmarkResult,
+  key: ExpandedParameterKey,
+  value: number
+): void {
+  result[key] = value;
 }
 
 export const benchmark = new BenchmarkService();
