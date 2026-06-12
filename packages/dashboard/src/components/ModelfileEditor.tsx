@@ -18,6 +18,22 @@ const IMPACT_STYLES: Record<string, string> = {
   quality: 'bg-forge-success/20 text-forge-success',
 };
 
+interface ModelfileResult {
+  numGpu?: number;
+  splitRatio: string;
+  numThread?: number;
+  numBatch?: number;
+  maxContextTokens?: number;
+  estimatedVramMb: number;
+  storageAdvice?: string;
+  recommendations?: Recommendation[];
+  content: string;
+}
+
+interface HardwareInfo {
+  gpus?: Array<{ vramFreeMb: number; vramTotalMb: number }>;
+}
+
 export function ModelfileEditor({ models }: ModelfileEditorProps) {
   const { generateModelfile, generateModelfileAuto, getHardware, loading } = useOllama();
   const [selectedModel, setSelectedModel] = useState('');
@@ -25,14 +41,14 @@ export function ModelfileEditor({ models }: ModelfileEditorProps) {
   const [useCase, setUseCase] = useState('chat');
   const [gpuVram, setGpuVram] = useState('8192');
   const [autoDetect, setAutoDetect] = useState(true);
-  const [result, setResult] = useState<any>(null);
-  const [hardwareInfo, setHardwareInfo] = useState<any>(null);
+  const [result, setResult] = useState<ModelfileResult | null>(null);
+  const [hardwareInfo, setHardwareInfo] = useState<HardwareInfo | null>(null);
 
   const handleDetectHardware = async () => {
     const hw = await getHardware();
     if (hw) {
       setHardwareInfo(hw);
-      const gpu = (hw as any).gpus?.[0];
+      const gpu = (hw as HardwareInfo).gpus?.[0];
       if (gpu) setGpuVram(String(Math.round(gpu.vramFreeMb || gpu.vramTotalMb)));
     }
   };
@@ -61,7 +77,7 @@ export function ModelfileEditor({ models }: ModelfileEditorProps) {
       };
       res = await generateModelfile(hardware, config);
     }
-    if (res) setResult(res);
+    if (res) setResult(res as ModelfileResult);
   };
 
   return (
@@ -162,11 +178,11 @@ export function ModelfileEditor({ models }: ModelfileEditorProps) {
           </div>
 
           {/* Recommendations */}
-          {result.recommendations?.length > 0 && (
+          {result.recommendations && result.recommendations.length > 0 && (
             <div className="bg-forge-card border border-forge-border rounded-xl p-6">
               <h3 className="text-sm font-semibold mb-3">Recommendations</h3>
               <div className="space-y-2">
-                {result.recommendations.map((r: Recommendation, i: number) => (
+                {result.recommendations!.map((r, i) => (
                   <div key={i} className="flex items-start gap-3 text-sm">
                     <span className={`shrink-0 px-2 py-0.5 rounded text-xs font-medium ${IMPACT_STYLES[r.impact] || ''}`}>
                       {r.impact}

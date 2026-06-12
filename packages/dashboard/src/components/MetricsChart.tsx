@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
+interface MetricsData {
+  timestamp: number;
+  vram: { totalUsed: number };
+  models: { running: Array<{ name: string }> };
+}
+
 interface MetricsChartProps {
-  metrics: any;
+  metrics: MetricsData | null;
 }
 
 interface DataPoint {

@@ -26,11 +26,27 @@ const DEFAULT_STEPS: Record<BenchmarkMode, number[]> = {
   'batch-size': [128, 256, 512, 1024, 2048],
 };
 
+interface BenchmarkSummary {
+  label?: string;
+  kvCacheType?: string;
+  avgTokensPerSecond: number;
+  avgPromptEvalTps?: number;
+  avgTotalDurationMs: number;
+  totalRuns: number;
+}
+
+interface BenchmarkResult {
+  model: string;
+  mode?: string;
+  completedAt?: number;
+  summary: BenchmarkSummary[];
+}
+
 export function BenchmarkRunner({ models, benchmarkProgress }: BenchmarkRunnerProps) {
   const { startBenchmark, startExpandedBenchmark, apiCall } = useOllama();
   const [selectedModel, setSelectedModel] = useState('');
   const [mode, setMode] = useState<BenchmarkMode>('kv-cache');
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<BenchmarkResult | null>(null);
   const [status, setStatus] = useState<'idle' | 'running' | 'done'>('idle');
 
   const handleRun = async () => {
@@ -59,15 +75,15 @@ export function BenchmarkRunner({ models, benchmarkProgress }: BenchmarkRunnerPr
     const endpoint = mode === 'kv-cache' ? '/benchmark/result' : '/benchmark/result-expanded';
     const poll = setInterval(async () => {
       const res = await apiCall(endpoint);
-      if (res && (res as any).completedAt) {
+      if (res && (res as BenchmarkResult).completedAt) {
         clearInterval(poll);
-        setResult(res);
+        setResult(res as BenchmarkResult);
         setStatus('done');
       }
     }, 3000);
   };
 
-  const summaryData = result?.summary?.map((s: any) => ({
+  const summaryData = result?.summary?.map((s) => ({
     name: s.label || s.kvCacheType || '',
     'Tok/s': s.avgTokensPerSecond,
     'Prompt Tok/s': s.avgPromptEvalTps || 0,
@@ -192,7 +208,7 @@ export function BenchmarkRunner({ models, benchmarkProgress }: BenchmarkRunnerPr
                 </tr>
               </thead>
               <tbody>
-                {result.summary.map((s: any, i: number) => (
+                {result.summary.map((s, i) => (
                   <tr key={i} className="border-b border-forge-border/50">
                     <td className="py-2 px-2 text-forge-text font-medium">
                       {s.label || s.kvCacheType}

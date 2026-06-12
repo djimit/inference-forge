@@ -722,9 +722,10 @@ router.get('/sessions/:id', (req, res) => {
 });
 
 router.post('/sessions/:id/message', async (req, res) => {
-  const { content } = req.body as { content: string };
+  const parsed = parseMessageBody(req.body);
+  if (!parsed.ok) { res.status(400).json({ error: parsed.error }); return; }
   try {
-    const response = await orchestrator.sendMessage(req.params.id, content);
+    const response = await orchestrator.sendMessage(req.params.id, parsed.value.content);
     res.json({ response });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -774,9 +775,10 @@ router.post('/workflows', (req, res) => {
 });
 
 router.post('/workflows/:id/execute', async (req, res) => {
-  const { input } = req.body as { input: string };
+  const parsed = parseMessageBody(req.body);
+  if (!parsed.ok) { res.status(400).json({ error: parsed.error }); return; }
   try {
-    const results = await orchestrator.executeWorkflow(req.params.id, input);
+    const results = await orchestrator.executeWorkflow(req.params.id, parsed.value.content);
     res.json({ results });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -795,8 +797,9 @@ router.get('/orchestrator/status', async (_req, res) => {
 });
 
 router.post('/route', (req, res) => {
-  const { content } = req.body as { content: string };
-  const agent = orchestrator.routeMessage(content);
+  const parsed = parseMessageBody(req.body);
+  if (!parsed.ok) { res.status(400).json({ error: parsed.error }); return; }
+  const agent = orchestrator.routeMessage(parsed.value.content);
   res.json({ agent: agent || null });
 });
 

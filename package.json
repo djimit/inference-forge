@@ -13,11 +13,16 @@
     "dev:dashboard": "npm run dev -w packages/dashboard",
     "build": "npm run build -w packages/server && npm run build -w packages/dashboard",
     "typecheck": "npm run typecheck -w packages/server && npm run typecheck -w packages/dashboard",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "start": "npm run start -w packages/server"
   },
   "devDependencies": {
+    "@types/supertest": "^7.2.0",
     "concurrently": "^9.1.0",
-    "typescript": "^5.7.0"
+    "supertest": "^7.2.2",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.8"
   },
   "overrides": {
     "lodash": "4.18.1"

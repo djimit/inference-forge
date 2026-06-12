@@ -8,13 +8,25 @@ const DRIVE_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   unknown: { label: 'Unknown', color: 'text-forge-muted' },
 };
 
+interface IoProfile {
+  ollamaModelDir: string;
+  readBandwidthMBs?: number;
+  drives?: Array<{ path: string; type: string; sizeTotalGb: number }>;
+  modelStorage?: Array<{ modelName: string; driveType: string }>;
+  recommendations?: string[];
+}
+
+interface IoBenchmarkResult {
+  running: boolean;
+}
+
 export function IoProfilePanel() {
   const { getIoProfile, apiCall } = useOllama();
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<IoProfile | null>(null);
   const [benchmarkStatus, setBenchmarkStatus] = useState<'idle' | 'running' | 'done'>('idle');
 
   useEffect(() => {
-    getIoProfile().then((res) => { if (res) setProfile(res); });
+    getIoProfile().then((res) => { if (res) setProfile(res as IoProfile); });
   }, [getIoProfile]);
 
   const handleBenchmark = async () => {
@@ -22,13 +34,13 @@ export function IoProfilePanel() {
     await apiCall('/io/benchmark', { method: 'POST' });
 
     const poll = setInterval(async () => {
-      const res = await apiCall<any>('/io/benchmark/result');
+      const res = await apiCall<IoBenchmarkResult>('/io/benchmark/result');
       if (res && !res.running) {
         clearInterval(poll);
         setBenchmarkStatus('done');
         // Refresh profile to get updated bandwidth
         const updated = await getIoProfile();
-        if (updated) setProfile(updated);
+        if (updated) setProfile(updated as IoProfile);
       }
     }, 2000);
   };
@@ -70,11 +82,11 @@ export function IoProfilePanel() {
       )}
 
       {/* Drives */}
-      {profile.drives?.length > 0 && (
+      {profile.drives && profile.drives.length > 0 && (
         <div className="mb-3">
           <div className="text-xs text-forge-muted mb-1">Detected Drives</div>
           <div className="space-y-1">
-            {profile.drives.map((d: any, i: number) => {
+            {profile.drives!.map((d, i) => {
               const dt = DRIVE_TYPE_LABELS[d.type] || DRIVE_TYPE_LABELS.unknown;
               return (
                 <div key={i} className="flex justify-between text-xs">
@@ -91,11 +103,11 @@ export function IoProfilePanel() {
       )}
 
       {/* Model Storage */}
-      {profile.modelStorage?.length > 0 && (
+      {profile.modelStorage && profile.modelStorage.length > 0 && (
         <div className="mb-3">
-          <div className="text-xs text-forge-muted mb-1">Model Placement ({profile.modelStorage.length} models)</div>
+          <div className="text-xs text-forge-muted mb-1">Model Placement ({profile.modelStorage!.length} models)</div>
           <div className="max-h-32 overflow-y-auto space-y-1">
-            {profile.modelStorage.slice(0, 20).map((m: any, i: number) => {
+            {profile.modelStorage!.slice(0, 20).map((m, i) => {
               const dt = DRIVE_TYPE_LABELS[m.driveType] || DRIVE_TYPE_LABELS.unknown;
               return (
                 <div key={i} className="flex justify-between text-xs">
@@ -109,9 +121,9 @@ export function IoProfilePanel() {
       )}
 
       {/* Recommendations */}
-      {profile.recommendations?.length > 0 && (
+      {profile.recommendations && profile.recommendations.length > 0 && (
         <div className="space-y-1">
-          {profile.recommendations.map((r: string, i: number) => (
+          {profile.recommendations!.map((r, i) => (
             <div key={i} className="text-xs text-forge-warning bg-forge-warning/10 rounded p-2">
               {r}
             </div>

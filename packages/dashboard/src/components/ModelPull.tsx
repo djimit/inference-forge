@@ -7,6 +7,11 @@ interface PullProgress {
   completed?: number;
 }
 
+interface PullErrorEvent {
+  status: string;
+  error?: string;
+}
+
 export function ModelPull({ onComplete }: { onComplete?: () => void }) {
   const [modelName, setModelName] = useState('');
   const [pulling, setPulling] = useState(false);
@@ -53,8 +58,14 @@ export function ModelPull({ onComplete }: { onComplete?: () => void }) {
             if (event.status === 'success') {
               setModelName('');
               onComplete?.();
+interface PullErrorEvent {
+  status: string;
+  error?: string;
+}
+
+// ... in handlePull:
             } else if (event.status === 'error') {
-              setError((event as any).error || 'Pull failed');
+              setError((event as PullErrorEvent).error || 'Pull failed');
             }
           } catch { /* skip */ }
         }

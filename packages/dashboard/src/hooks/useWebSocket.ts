@@ -1,8 +1,101 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
+interface Model {
+  name: string;
+  size: number;
+  details: {
+    parameter_size: string;
+    quantization_level: string;
+    family: string;
+  };
+}
+
+interface RunningModel extends Model {
+  size_vram: number;
+  expires_at: string;
+}
+
+interface SystemMetrics {
+  timestamp: number;
+  models: {
+    available: Model[];
+    running: RunningModel[];
+  };
+  vram: {
+    totalUsed: number;
+    totalAvailable: number;
+    perModel: Array<{
+      name: string;
+      sizeVram: number;
+      sizeTotal: number;
+      parameterSize: string;
+      quantization: string;
+    }>;
+  };
+  kvCache: {
+    estimatedPerModel: Array<{
+      name: string;
+      estimatedKvBytes: number;
+      kvCacheType: string;
+      numCtx: number;
+    }>;
+  };
+  ollamaOnline: boolean;
+}
+
+interface GpuInfo {
+  index: number;
+  name: string;
+  vendor: string;
+  vramTotalMb: number;
+  vramUsedMb: number;
+  vramFreeMb: number;
+  utilizationPercent: number;
+  temperatureCelsius: number | null;
+  powerDrawWatts: number | null;
+  driverVersion: string;
+}
+
+interface HardwareSnapshot {
+  system: { platform: string; cpuModel: string; cpuCores: number; ramTotalMb: number; ramFreeMb: number; ramUsedMb: number };
+  gpus: GpuInfo[];
+  totalGpuVramMb: number;
+  totalGpuVramUsedMb: number;
+}
+
+interface AlertData {
+  id: string;
+  timestamp: number;
+  severity: 'info' | 'warning' | 'critical';
+  category: string;
+  title: string;
+  message: string;
+  acknowledged: boolean;
+}
+
+interface ThroughputData {
+  models: Record<string, {
+    model: string;
+    samples: Array<{ timestamp: number; tokensPerSecond: number }>;
+    avgTokensPerSecond: number;
+    peakTokensPerSecond: number;
+    totalRequests: number;
+  }>;
+  globalAvgTps: number;
+}
+
+interface PressureData {
+  pressureLevel: string;
+  vramUsedMb: number;
+  vramTotalMb: number;
+  loadedModels?: Array<{ name: string; vramUsageMb: number }>;
+  advice: string;
+  concurrentModelLimit: number;
+}
+
 interface WSMessage {
   type: string;
-  data: any;
+  data: unknown;
 }
 
 export interface BenchmarkProgress {
@@ -11,11 +104,11 @@ export interface BenchmarkProgress {
 }
 
 export function useWebSocket(url: string) {
-  const [metrics, setMetrics] = useState<any>(null);
-  const [hardwareData, setHardwareData] = useState<any>(null);
-  const [alertsData, setAlertsData] = useState<any[]>([]);
-  const [throughputData, setThroughputData] = useState<any>(null);
-  const [pressureData, setPressureData] = useState<any>(null);
+  const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
+  const [hardwareData, setHardwareData] = useState<HardwareSnapshot | null>(null);
+  const [alertsData, setAlertsData] = useState<AlertData[]>([]);
+  const [throughputData, setThroughputData] = useState<ThroughputData | null>(null);
+  const [pressureData, setPressureData] = useState<PressureData | null>(null);
   const [benchmarkProgress, setBenchmarkProgress] = useState<BenchmarkProgress | null>(null);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -36,27 +129,26 @@ export function useWebSocket(url: string) {
         const msg: WSMessage = JSON.parse(event.data);
         switch (msg.type) {
           case 'metrics':
-            setMetrics(msg.data);
+            setMetrics(msg.data as SystemMetrics);
             break;
           case 'hardware':
-            setHardwareData(msg.data);
+            setHardwareData(msg.data as HardwareSnapshot);
             break;
           case 'alert':
-            setAlertsData((prev) => [msg.data, ...prev].slice(0, 50));
+            setAlertsData((prev) => [msg.data as AlertData, ...prev].slice(0, 50));
             break;
           case 'alerts':
-            setAlertsData(Array.isArray(msg.data) ? msg.data : []);
+            setAlertsData(Array.isArray(msg.data) ? msg.data as AlertData[] : []);
             break;
           case 'throughput':
-            setThroughputData(msg.data);
+            setThroughputData(msg.data as ThroughputData);
             break;
           case 'pressure':
-            setPressureData(msg.data);
+            setPressureData(msg.data as PressureData);
             break;
           case 'benchmark-progress':
-            setBenchmarkProgress(msg.data);
-            // Clear progress after completion
-            if (msg.data.progress >= 1) {
+            setBenchmarkProgress(msg.data as BenchmarkProgress);
+            if ((msg.data as BenchmarkProgress).progress >= 1) {
               setTimeout(() => setBenchmarkProgress(null), 3000);
             }
             break;

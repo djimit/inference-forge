@@ -1,8 +1,23 @@
 import React, { useState } from 'react';
 import { useOllama } from '../hooks/useOllama';
 
+interface PressureData {
+  pressureLevel: string;
+  vramUsedMb: number;
+  vramTotalMb: number;
+  loadedModels?: Array<{ name: string; vramUsageMb: number }>;
+  advice: string;
+  concurrentModelLimit: number;
+}
+
+interface PressurePrediction {
+  fitsInFreeVram: boolean;
+  recommendedAction: string;
+  estimatedVramMb: number;
+}
+
 interface PressurePanelProps {
-  pressure: any;
+  pressure: PressureData | null;
   models?: Array<{ name: string }>;
 }
 
@@ -16,7 +31,7 @@ const LEVEL_STYLES: Record<string, { bg: string; text: string; dot: string }> = 
 export function PressurePanel({ pressure, models }: PressurePanelProps) {
   const { predictPressure } = useOllama();
   const [selectedModel, setSelectedModel] = useState('');
-  const [prediction, setPrediction] = useState<any>(null);
+  const [prediction, setPrediction] = useState<PressurePrediction | null>(null);
 
   if (!pressure) {
     return (
@@ -35,7 +50,7 @@ export function PressurePanel({ pressure, models }: PressurePanelProps) {
   const handlePredict = async () => {
     if (!selectedModel) return;
     const res = await predictPressure(selectedModel);
-    if (res) setPrediction(res);
+    if (res) setPrediction(res as PressurePrediction);
   };
 
   return (
@@ -67,9 +82,9 @@ export function PressurePanel({ pressure, models }: PressurePanelProps) {
       </div>
 
       {/* Loaded Models */}
-      {pressure.loadedModels?.length > 0 && (
+      {pressure.loadedModels && pressure.loadedModels.length > 0 && (
         <div className="mb-3 space-y-1">
-          {pressure.loadedModels.map((m: any) => (
+          {pressure.loadedModels!.map((m) => (
             <div key={m.name} className="flex justify-between text-xs">
               <span className="text-forge-text truncate mr-2">{m.name}</span>
               <span className="text-forge-muted shrink-0">{m.vramUsageMb}MB</span>

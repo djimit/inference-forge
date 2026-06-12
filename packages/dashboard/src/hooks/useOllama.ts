@@ -2,6 +2,32 @@ import { useState, useCallback } from 'react';
 
 const API_BASE = '/api';
 
+interface HardwareProfile {
+  gpuVramMb: number;
+  systemRamMb: number;
+  gpuName: string;
+  cpuCores: number;
+  cpuPhysicalCores: number;
+  pcieGeneration: number | null;
+  pcieBandwidthGBs: number | null;
+}
+
+interface ModelfileConfig {
+  baseModel: string;
+  customName: string;
+  useCase: string;
+}
+
+interface ExpandedBenchmarkConfig {
+  mode: string;
+  model: string;
+  runs: number;
+  gpuLayerSteps?: number[];
+  threadCountSteps?: number[];
+  contextLengthSteps?: number[];
+  batchSizeSteps?: number[];
+}
+
 export function useOllama() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +65,7 @@ export function useOllama() {
   );
 
   const generateModelfile = useCallback(
-    (hardware: any, config: any) =>
+    (hardware: HardwareProfile, config: ModelfileConfig) =>
       apiCall('/modelfile/generate', {
         method: 'POST',
         body: JSON.stringify({ hardware, config }),
@@ -48,7 +74,7 @@ export function useOllama() {
   );
 
   const generateModelfileAuto = useCallback(
-    (config: any) =>
+    (config: ModelfileConfig) =>
       apiCall('/modelfile/generate-auto', {
         method: 'POST',
         body: JSON.stringify({ config }),
@@ -62,7 +88,7 @@ export function useOllama() {
   );
 
   const startExpandedBenchmark = useCallback(
-    (config: any) =>
+    (config: ExpandedBenchmarkConfig) =>
       apiCall('/benchmark/run-expanded', {
         method: 'POST',
         body: JSON.stringify(config),

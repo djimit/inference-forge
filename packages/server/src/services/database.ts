@@ -7,7 +7,21 @@
 import { join } from 'path';
 import { createRequire } from 'module';
 
+type SqliteRow = Record<string, unknown>;
+
+interface SqliteDb {
+  pragma(sql: string): void;
+  exec(sql: string): void;
+  prepare(sql: string): {
+    get(...args: unknown[]): SqliteRow | undefined;
+    all(...args: unknown[]): SqliteRow[];
+    run(...args: unknown[]): void;
+  };
+  close(): void;
+}
+
 // Dynamic import with fallback for native module issues
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let Database: any = null;
 try {
   const require = createRequire(import.meta.url);
@@ -19,7 +33,7 @@ try {
 // -- Service --------------------------------------------------------
 
 export class DatabaseService {
-  private db: any = null;
+  private db: SqliteDb | null = null;
   private enabled = false;
 
   constructor(dbPath?: string) {
@@ -28,7 +42,7 @@ export class DatabaseService {
     try {
       const path = dbPath || join(process.cwd(), 'inference-forge.db');
       this.db = new Database(path);
-      this.db.pragma('journal_mode = WAL');
+      this.db!.pragma('journal_mode = WAL');
       this.migrate();
       this.enabled = true;
       console.log(`[Database] SQLite ready at ${path}`);
@@ -42,7 +56,7 @@ export class DatabaseService {
   }
 
   private migrate(): void {
-    this.db.exec(`
+    this.db!.exec(`
       CREATE TABLE IF NOT EXISTS benchmark_runs (
         id TEXT PRIMARY KEY,
         mode TEXT NOT NULL,
@@ -120,58 +134,59 @@ export class DatabaseService {
 
   // -- Benchmark Methods --------------------------------------------
 
-  saveBenchmarkRun(summary: any): void {
+  saveBenchmarkRun(summary: unknown): void {
     if (!this.enabled) return;
+    const s = summary as Record<string, unknown>;
     try {
-      const stmt = this.db.prepare(`
+      const stmt = this.db!.prepare(`
         INSERT OR REPLACE INTO benchmark_runs (id, mode, model, config_json, summary_json, results_json, started_at, completed_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
       stmt.run(
-        summary.id || `bench-${Date.now()}`,
-        summary.mode || 'kv-cache',
-        summary.model,
-        JSON.stringify(summary.config || {}),
-        JSON.stringify(summary.summary || []),
-        JSON.stringify(summary.results || []),
-        summary.startedAt,
-        summary.completedAt
+        s.id || `bench-${Date.now()}`,
+        s.mode || 'kv-cache',
+        s.model,
+        JSON.stringify(s.config || {}),
+        JSON.stringify(s.summary || []),
+        JSON.stringify(s.results || []),
+        s.startedAt,
+        s.completedAt
       );
     } catch (err) {
       console.error('[Database] saveBenchmarkRun error:', err);
     }
   }
 
-  getBenchmarkRun(id: string): any | null {
+  getBenchmarkRun(id: string): Record<string, unknown> | null {
     if (!this.enabled) return null;
     try {
-      const row = this.db.prepare('SELECT * FROM benchmark_runs WHERE id = ?').get(id);
+      const row = this.db!.prepare('SELECT * FROM benchmark_runs WHERE id = ?').get(id);
       if (!row) return null;
       return {
         ...row,
-        summary: JSON.parse(row.summary_json),
-        results: JSON.parse(row.results_json),
-        config: JSON.parse(row.config_json || '{}'),
+        summary: JSON.parse(row.summary_json as string),
+        results: JSON.parse(row.results_json as string),
+        config: JSON.parse((row.config_json as string) || '{}'),
       };
     } catch {
       return null;
     }
   }
 
-  listBenchmarkRuns(limit = 50, mode?: string): any[] {
+  listBenchmarkRuns(limit = 50, mode?: string): Record<string, unknown>[] {
     if (!this.enabled) return [];
     try {
       const sql = mode
         ? 'SELECT id, mode, model, started_at, completed_at, summary_json FROM benchmark_runs WHERE mode = ? ORDER BY completed_at DESC LIMIT ?'
         : 'SELECT id, mode, model, started_at, completed_at, summary_json FROM benchmark_runs ORDER BY completed_at DESC LIMIT ?';
-      const rows = mode ? this.db.prepare(sql).all(mode, limit) : this.db.prepare(sql).all(limit);
-      return rows.map((r: any) => ({
+      const rows = mode ? this.db!.prepare(sql).all(mode, limit) : this.db!.prepare(sql).all(limit);
+      return rows.map((r: SqliteRow) => ({
         id: r.id,
         mode: r.mode,
         model: r.model,
         startedAt: r.started_at,
         completedAt: r.completed_at,
-        summary: JSON.parse(r.summary_json),
+        summary: JSON.parse(r.summary_json as string),
       }));
     } catch {
       return [];
@@ -180,24 +195,25 @@ export class DatabaseService {
 
   // -- Hardware Methods ----------------------------------------------
 
-  saveHardwareSnapshot(snapshot: any): void {
+  saveHardwareSnapshot(snapshot: unknown): void {
     if (!this.enabled) return;
+    const s = snapshot as Record<string, unknown>;
     try {
-      this.db.prepare(
+      this.db!.prepare(
         'INSERT INTO hardware_snapshots (timestamp, snapshot_json) VALUES (?, ?)'
-      ).run(snapshot.timestamp, JSON.stringify(snapshot));
+      ).run(s.timestamp, JSON.stringify(s));
     } catch (err) {
       console.error('[Database] saveHardwareSnapshot error:', err);
     }
   }
 
-  getHardwareHistory(since: number, limit = 100): any[] {
+  getHardwareHistory(since: number, limit = 100): Record<string, unknown>[] {
     if (!this.enabled) return [];
     try {
-      const rows = this.db.prepare(
+      const rows = this.db!.prepare(
         'SELECT * FROM hardware_snapshots WHERE timestamp > ? ORDER BY timestamp DESC LIMIT ?'
       ).all(since, limit);
-      return rows.map((r: any) => JSON.parse(r.snapshot_json));
+      return rows.map((r: SqliteRow) => JSON.parse(r.snapshot_json as string));
     } catch {
       return [];
     }
@@ -205,37 +221,38 @@ export class DatabaseService {
 
   // -- Alert Methods -------------------------------------------------
 
-  saveAlert(alert: any): void {
+  saveAlert(alert: unknown): void {
     if (!this.enabled) return;
+    const a = alert as Record<string, unknown>;
     try {
-      this.db.prepare(`
+      this.db!.prepare(`
         INSERT OR REPLACE INTO alert_history (id, timestamp, severity, category, title, message, model, value, threshold, acknowledged)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        alert.id,
-        alert.timestamp,
-        alert.severity,
-        alert.category,
-        alert.title,
-        alert.message,
-        alert.model || null,
-        alert.value ?? null,
-        alert.threshold ?? null,
-        alert.acknowledged ? 1 : 0
+        a.id,
+        a.timestamp,
+        a.severity,
+        a.category,
+        a.title,
+        a.message,
+        a.model || null,
+        a.value ?? null,
+        a.threshold ?? null,
+        a.acknowledged ? 1 : 0
       );
     } catch (err) {
       console.error('[Database] saveAlert error:', err);
     }
   }
 
-  getAlertHistory(limit = 100, since?: number): any[] {
+  getAlertHistory(limit = 100, since?: number): Record<string, unknown>[] {
     if (!this.enabled) return [];
     try {
       const sql = since
         ? 'SELECT * FROM alert_history WHERE timestamp > ? ORDER BY timestamp DESC LIMIT ?'
         : 'SELECT * FROM alert_history ORDER BY timestamp DESC LIMIT ?';
-      const rows = since ? this.db.prepare(sql).all(since, limit) : this.db.prepare(sql).all(limit);
-      return rows.map((r: any) => ({
+      const rows = since ? this.db!.prepare(sql).all(since, limit) : this.db!.prepare(sql).all(limit);
+      return rows.map((r: SqliteRow) => ({
         ...r,
         acknowledged: !!r.acknowledged,
       }));
@@ -268,7 +285,7 @@ export class DatabaseService {
   }): void {
     if (!this.enabled) return;
     try {
-      this.db.prepare(`
+      this.db!.prepare(`
         INSERT OR REPLACE INTO model_profiles
         (id, backend, model_id, display_name, parameter_size, quantization, architecture,
          tok_s_gpu, tok_s_cpu, prompt_tok_s, first_token_ms, vram_usage_mb, ram_usage_mb,
@@ -299,10 +316,10 @@ export class DatabaseService {
     }
   }
 
-  getModelProfile(backend: string, modelId: string): any | null {
+  getModelProfile(backend: string, modelId: string): Record<string, unknown> | null {
     if (!this.enabled) return null;
     try {
-      return this.db.prepare(
+      return this.db!.prepare(
         'SELECT * FROM model_profiles WHERE backend = ? AND model_id = ?'
       ).get(backend, modelId) || null;
     } catch {
@@ -310,10 +327,10 @@ export class DatabaseService {
     }
   }
 
-  getAllModelProfiles(): any[] {
+  getAllModelProfiles(): Record<string, unknown>[] {
     if (!this.enabled) return [];
     try {
-      return this.db.prepare(
+      return this.db!.prepare(
         'SELECT * FROM model_profiles ORDER BY benchmarked_at DESC'
       ).all();
     } catch {
@@ -334,7 +351,7 @@ export class DatabaseService {
   }): void {
     if (!this.enabled) return;
     try {
-      this.db.prepare(`
+      this.db!.prepare(`
         INSERT INTO cost_samples (timestamp, provider, model, agent, input_tokens, output_tokens, estimated_cost_usd)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(
@@ -351,12 +368,12 @@ export class DatabaseService {
     }
   }
 
-  getCostSamples(since: number, limit = 500): any[] {
+  getCostSamples(since: number, limit = 500): Record<string, unknown>[] {
     if (!this.enabled) return [];
     try {
-      return this.db.prepare(
+      return this.db!.prepare(
         'SELECT * FROM cost_samples WHERE timestamp > ? ORDER BY timestamp DESC LIMIT ?'
-      ).all(since, limit).map((r: any) => ({
+      ).all(since, limit).map((r: SqliteRow) => ({
         timestamp: r.timestamp,
         provider: r.provider,
         model: r.model,
@@ -374,7 +391,7 @@ export class DatabaseService {
 
   close(): void {
     if (this.db) {
-      try { this.db.close(); } catch {}
+      try { this.db!.close(); } catch {}
     }
   }
 }
