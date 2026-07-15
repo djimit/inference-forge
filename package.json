@@ -36,6 +36,6 @@
   "author": "DjimIT B.V.",
   "license": "MIT",
   "dependencies": {
-    "recharts": "^3.8.1"
+    "recharts": "^3.9.1"
   }
 }
