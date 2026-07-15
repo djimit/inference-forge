@@ -5,6 +5,18 @@
 
 import { ollama, type RunningModel } from './ollama.js';
 
+export class ResourceLimitError extends Error {
+  constructor(
+    message: string,
+    public agentId: string,
+    public retryAfterMs: number,
+    public currentUsage: { vramMb: number; contextTokens: number; concurrentRequests: number }
+  ) {
+    super(message);
+    this.name = 'ResourceLimitError';
+  }
+}
+
 // -- Types ----------------------------------------------------------
 
 export interface AgentConfig {
@@ -94,17 +106,22 @@ export interface OrchestratorStatus {
 
 // -- Orchestrator ---------------------------------------------------
 
+interface QueueItem {
+  sessionId: string;
+  message: string;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  enqueuedAt: number;
+  resolve: (value: string) => void;
+  reject: (reason: Error) => void;
+}
+
 export class OrchestratorService {
   private agents: Map<string, AgentConfig> = new Map();
   private sessions: Map<string, AgentSession> = new Map();
   private workflows: Map<string, Workflow> = new Map();
-  private requestQueue: Array<{
-    sessionId: string;
-    message: string;
-    resolve: (value: string) => void;
-    reject: (reason: Error) => void;
-  }> = [];
+  private requestQueue: QueueItem[] = [];
   private processing = false;
+  private queueProcessorInterval: ReturnType<typeof setInterval> | null = null;
 
   // -- Agent Management -------------------------------------------
 
@@ -181,6 +198,39 @@ export class OrchestratorService {
     return this.sessions.delete(id);
   }
 
+  // -- Resource Management ---------------------------------------
+
+  checkResourceLimits(agentId: string): {
+    allowed: boolean;
+    reason?: string;
+    retryAfterMs?: number;
+    currentUsage: { vramMb: number; contextTokens: number; concurrentRequests: number };
+  } {
+    const agent = this.agents.get(agentId);
+    if (!agent) {
+      return { allowed: false, reason: 'Agent not found', currentUsage: { vramMb: 0, contextTokens: 0, concurrentRequests: 0 } };
+    }
+
+    const activeSessions = this.getSessionsForAgent(agentId).filter(s => s.status === 'processing');
+    const concurrentRequests = activeSessions.length;
+    const vramMb = 0; // Populated by getStatus() caller
+    const contextTokens = agent.resourceLimits.maxContextTokens;
+
+    if (concurrentRequests >= agent.resourceLimits.maxConcurrentRequests) {
+      return {
+        allowed: false,
+        reason: `Max concurrent requests (${agent.resourceLimits.maxConcurrentRequests}) exceeded`,
+        retryAfterMs: 5000,
+        currentUsage: { vramMb, contextTokens, concurrentRequests },
+      };
+    }
+
+    return {
+      allowed: true,
+      currentUsage: { vramMb, contextTokens, concurrentRequests },
+    };
+  }
+
   // -- Message Handling -------------------------------------------
 
   async sendMessage(sessionId: string, content: string): Promise<string> {
@@ -189,6 +239,17 @@ export class OrchestratorService {
 
     const agent = this.agents.get(session.agentId);
     if (!agent || !agent.enabled) throw new Error('Agent not available');
+
+    // Resource limit enforcement
+    const limits = this.checkResourceLimits(session.agentId);
+    if (!limits.allowed) {
+      throw new ResourceLimitError(
+        limits.reason || 'Resource limit exceeded',
+        session.agentId,
+        limits.retryAfterMs || 5000,
+        limits.currentUsage
+      );
+    }
 
     // Add user message
     session.messages.push({
@@ -376,6 +437,30 @@ export class OrchestratorService {
     return null;
   }
 
+  routeMessageWithFallback(content: string): {
+    agent: AgentConfig | null;
+    method: 'rule' | 'advisor' | 'fallback' | 'none';
+    confidence: number;
+  } {
+    // Stage 1: Exact rule match
+    const ruleMatch = this.routeMessage(content);
+    if (ruleMatch) {
+      return { agent: ruleMatch, method: 'rule', confidence: 1.0 };
+    }
+
+    // Stage 2: Find fallback agent
+    for (const agent of this.agents.values()) {
+      if (!agent.enabled) continue;
+      const hasFallback = agent.routing.some(r => r.condition === 'fallback');
+      if (hasFallback) {
+        return { agent, method: 'fallback', confidence: 0.5 };
+      }
+    }
+
+    // Stage 3: No match at all
+    return { agent: null, method: 'none', confidence: 0 };
+  }
+
   // -- Workflow Execution -----------------------------------------
 
   registerWorkflow(workflow: Workflow): void {
@@ -505,6 +590,95 @@ export class OrchestratorService {
       activeSessionCount: [...this.sessions.values()].filter((s) => s.status !== 'idle').length,
       queueDepth: this.requestQueue.length,
     };
+  }
+
+  // -- Queue Management -------------------------------------------
+
+  enqueueMessage(
+    sessionId: string,
+    message: string,
+    priority: 'low' | 'medium' | 'high' | 'critical' = 'medium'
+  ): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      this.requestQueue.push({
+        sessionId,
+        message,
+        priority,
+        enqueuedAt: Date.now(),
+        resolve,
+        reject,
+      });
+      // Sort by priority (higher first)
+      const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+      this.requestQueue.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+    });
+  }
+
+  getQueueStatus(): {
+    depth: number;
+    oldestMessageMs: number;
+    byPriority: Record<string, number>;
+  } {
+    const now = Date.now();
+    const byPriority: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0 };
+    for (const item of this.requestQueue) {
+      byPriority[item.priority]++;
+    }
+    const oldest = this.requestQueue.length > 0
+      ? now - Math.min(...this.requestQueue.map(i => i.enqueuedAt))
+      : 0;
+    return { depth: this.requestQueue.length, oldestMessageMs: oldest, byPriority };
+  }
+
+  startQueueProcessor(intervalMs = 5000): void {
+    if (this.queueProcessorInterval) return;
+    this.queueProcessorInterval = setInterval(() => {
+      this.processQueue();
+    }, intervalMs);
+  }
+
+  stopQueueProcessor(): void {
+    if (this.queueProcessorInterval) {
+      clearInterval(this.queueProcessorInterval);
+      this.queueProcessorInterval = null;
+    }
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.requestQueue.length === 0) return;
+
+    const now = Date.now();
+    const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+    // Reject timed-out messages
+    const timedOut = this.requestQueue.filter(i => now - i.enqueuedAt > TIMEOUT_MS);
+    for (const item of timedOut) {
+      item.reject(new Error('Queue timeout: message waited too long'));
+    }
+    this.requestQueue = this.requestQueue.filter(i => now - i.enqueuedAt <= TIMEOUT_MS);
+
+    // Process next item if resources available
+    if (this.requestQueue.length === 0) return;
+    const next = this.requestQueue[0];
+    const session = this.sessions.get(next.sessionId);
+    if (!session) {
+      this.requestQueue.shift();
+      next.reject(new Error('Session not found'));
+      return;
+    }
+
+    const limits = this.checkResourceLimits(session.agentId);
+    if (!limits.allowed) {
+      return; // Wait for next interval
+    }
+
+    this.requestQueue.shift();
+    try {
+      const result = await this.sendMessage(next.sessionId, next.message);
+      next.resolve(result);
+    } catch (err) {
+      next.reject(err instanceof Error ? err : new Error(String(err)));
+    }
   }
 }
 

@@ -15,6 +15,7 @@ export interface BenchmarkConfig {
   kvCacheTypes: string[];
   prompts: BenchmarkPrompt[];
   runs: number;
+  warmupRuns?: number;
 }
 
 export interface ExpandedBenchmarkConfig {
@@ -70,6 +71,27 @@ export interface BenchmarkSummary {
   }>;
   startedAt: number;
   completedAt: number;
+  warmup?: {
+    avgTokensPerSecond: number;
+    warmupRuns: number;
+    coldStartPenalty: number;
+  };
+  validated: boolean;
+  issues: ValidationIssue[];
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface ValidationIssue {
+  severity: 'warning' | 'error';
+  stage: 'correctness' | 'performance';
+  message: string;
+  run?: number;
+  value?: number;
+}
+
+export interface ValidatedBenchmarkResult extends BenchmarkResult {
+  valid: boolean;
+  issues: ValidationIssue[];
 }
 
 export interface ExpandedBenchmarkSummary {
@@ -89,6 +111,14 @@ export interface ExpandedBenchmarkSummary {
   }>;
   startedAt: number;
   completedAt: number;
+  warmup?: {
+    avgTokensPerSecond: number;
+    warmupRuns: number;
+    coldStartPenalty: number;
+  };
+  validated: boolean;
+  issues: ValidationIssue[];
+  confidence: 'high' | 'medium' | 'low';
 }
 
 type ProgressCallback = (message: string, progress: number) => void;
@@ -159,6 +189,23 @@ export class BenchmarkService {
     let currentStep = 0;
 
     try {
+      // Warmup phase
+      const warmupRuns = config.warmupRuns ?? 1;
+      let warmupTps = 0;
+      let warmupCount = 0;
+      if (warmupRuns > 0) {
+        for (const prompt of config.prompts) {
+          for (let w = 0; w < warmupRuns; w++) {
+            const msg = `[warmup] ${prompt.label} — run ${w + 1}/${warmupRuns}`;
+            onProgress?.(msg, 0);
+            this.emitProgress(msg, 0);
+            const warmupResult = await this.runSingle(config.model, prompt);
+            warmupTps += warmupResult.tokensPerSecond;
+            warmupCount++;
+          }
+        }
+      }
+
       for (const kvType of config.kvCacheTypes) {
         const msg = `Testing KV cache type: ${kvType}`;
         onProgress?.(msg, currentStep / totalSteps);
@@ -195,7 +242,27 @@ export class BenchmarkService {
       onProgress?.('Benchmark complete', 1);
       this.emitProgress('Benchmark complete', 1);
 
-      return { model: config.model, results, summary, startedAt, completedAt: Date.now() };
+      const warmupAvg = warmupCount > 0 ? warmupTps / warmupCount : 0;
+      const measAvg = average(results.map((r) => r.tokensPerSecond));
+      const coldStartPenalty = measAvg > 0 ? Math.round(((measAvg - warmupAvg) / measAvg) * 100) : 0;
+
+      const validation = this.validateResults(results, config.prompts);
+
+      return {
+        model: config.model,
+        results,
+        summary,
+        startedAt,
+        completedAt: Date.now(),
+        warmup: warmupCount > 0 ? {
+          avgTokensPerSecond: Math.round(warmupAvg * 100) / 100,
+          warmupRuns,
+          coldStartPenalty,
+        } : undefined,
+        validated: validation.validated,
+        issues: validation.issues,
+        confidence: validation.confidence,
+      };
     } finally {
       this.running = false;
     }
@@ -261,6 +328,8 @@ export class BenchmarkService {
       onProgress?.(msg, 1);
       this.emitProgress(msg, 1);
 
+      const validation = this.validateResults(results, prompts);
+
       return {
         id: `bench-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         mode: config.mode,
@@ -269,6 +338,10 @@ export class BenchmarkService {
         summary: summaryItems,
         startedAt,
         completedAt: Date.now(),
+        warmup: undefined,
+        validated: validation.validated,
+        issues: validation.issues,
+        confidence: validation.confidence,
       };
     } finally {
       this.running = false;
@@ -366,6 +439,64 @@ export class BenchmarkService {
     });
 
     return { results, summaryItems };
+  }
+
+  private validateResults(results: BenchmarkResult[], prompts: BenchmarkPrompt[]): {
+    validated: boolean;
+    issues: ValidationIssue[];
+    confidence: 'high' | 'medium' | 'low';
+  } {
+    const issues: ValidationIssue[] = [];
+
+    // Stage 1: Correctness validation (per result)
+    for (const result of results) {
+      if (result.tokensPerSecond <= 0) {
+        issues.push({ severity: 'error', stage: 'correctness', message: `Run ${result.run} for ${result.kvCacheType}/${result.prompt}: tokensPerSecond is 0 (Ollama error?)`, run: result.run, value: result.tokensPerSecond });
+      }
+      if (result.evalCount <= 0) {
+        issues.push({ severity: 'error', stage: 'correctness', message: `Run ${result.run} for ${result.kvCacheType}/${result.prompt}: evalCount is 0 (no tokens generated)`, run: result.run });
+      }
+      if (result.totalDurationMs <= 0) {
+        issues.push({ severity: 'error', stage: 'correctness', message: `Run ${result.run} for ${result.kvCacheType}/${result.prompt}: totalDurationMs is 0 (timing error)`, run: result.run });
+      }
+      const prompt = prompts.find(p => p.label === result.prompt);
+      if (prompt && result.evalCount < prompt.expectedTokens * 0.3) {
+        issues.push({ severity: 'warning', stage: 'correctness', message: `Run ${result.run} for ${result.kvCacheType}/${result.prompt}: evalCount (${result.evalCount}) is much lower than expected (${prompt.expectedTokens})`, run: result.run, value: result.evalCount });
+      }
+    }
+
+    // Stage 2: Performance validation (per configuration)
+    const kvTypes = [...new Set(results.map(r => r.kvCacheType))];
+    for (const kvType of kvTypes) {
+      const kvResults = results.filter(r => r.kvCacheType === kvType);
+      if (kvResults.length < 2) continue;
+
+      const tpsValues = kvResults.map(r => r.tokensPerSecond);
+      const mean = tpsValues.reduce((a, b) => a + b, 0) / tpsValues.length;
+      const variance = tpsValues.reduce((sum, v) => sum + (v - mean) ** 2, 0) / tpsValues.length;
+      const stdDev = Math.sqrt(variance);
+      const cv = mean > 0 ? (stdDev / mean) * 100 : 0;
+
+      if (cv > 30) {
+        issues.push({ severity: 'warning', stage: 'performance', message: `${kvType}: coefficient of variation is ${cv.toFixed(1)}% (>30% threshold) — results are inconsistent`, value: Math.round(cv) });
+      }
+
+      // Outlier detection
+      for (const r of kvResults) {
+        if (stdDev > 0 && Math.abs(r.tokensPerSecond - mean) > 2 * stdDev) {
+          issues.push({ severity: 'warning', stage: 'performance', message: `${kvType} run ${r.run}: outlier detected (TPS ${r.tokensPerSecond} vs mean ${mean.toFixed(1)})`, run: r.run, value: r.tokensPerSecond });
+        }
+      }
+    }
+
+    const errors = issues.filter(i => i.severity === 'error').length;
+    const warnings = issues.filter(i => i.severity === 'warning').length;
+    let confidence: 'high' | 'medium' | 'low' = 'high';
+    if (errors > 0) confidence = 'low';
+    else if (warnings > 2) confidence = 'low';
+    else if (warnings > 0) confidence = 'medium';
+
+    return { validated: errors === 0, issues, confidence };
   }
 
   private buildSummaryItem(

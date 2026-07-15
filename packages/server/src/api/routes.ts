@@ -14,7 +14,7 @@ import { perplexity } from '../services/perplexity.js';
 import { benchmarkState } from '../services/benchmark-state.js';
 import { promptLibrary } from '../services/prompt-library.js';
 import { modelfileLibrary } from '../services/modelfile-library.js';
-import { orchestrator, type AgentConfig, type Workflow } from '../services/orchestrator.js';
+import { orchestrator, ResourceLimitError, type AgentConfig, type Workflow } from '../services/orchestrator.js';
 import { pressure } from '../services/pressure.js';
 import { database } from '../services/database.js';
 import { ioProfiler } from '../services/io-profiler.js';
@@ -697,6 +697,12 @@ router.put('/agents/:id', (req, res) => {
 router.delete('/agents/:id', (req, res) => {
   const success = orchestrator.unregisterAgent(req.params.id);
   res.json({ success });
+});
+
+// -- Queue Status ---------------------------------------------------
+
+router.get('/queue', (_req, res) => {
+  res.json(orchestrator.getQueueStatus());
 });
 
 // -- v0.5: Sessions -------------------------------------------------
