@@ -21,7 +21,7 @@
     "@types/supertest": "^7.2.0",
     "concurrently": "^10.0.3",
     "supertest": "^7.2.2",
-    "typescript": "^5.7.0",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.8"
   },
   "overrides": {
