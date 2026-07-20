@@ -10,7 +10,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "better-sqlite3": "^12.8.0",
+    "better-sqlite3": "^12.11.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
     "express": "^5.2.1",
