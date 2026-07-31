@@ -399,7 +399,7 @@ export class ModelfileGenerator {
   private estimateModelSizeMb(name: string, info: ModelInfo | null): number {
     // Try to get actual size from model info parameter_size
     if (info?.details?.parameter_size) {
-      const match = info.details.parameter_size.match(/([\d.]+)\s*B/i);
+      const match = info.details.parameter_size.slice(0, 64).match(/([0-9]+(?:\.[0-9]+)?)\s*B/i);
       if (match) {
         const billions = parseFloat(match[1]);
         // Quantized models: estimate based on quantization level
@@ -414,7 +414,7 @@ export class ModelfileGenerator {
       }
     }
     // Fallback: parse from name
-    const match = name.match(/(\d+\.?\d*)[bB]/);
+    const match = name.slice(0, 256).match(/([0-9]+(?:\.[0-9]+)?)[bB]/);
     if (match) {
       return Math.round(parseFloat(match[1]) * 1000 * 0.5);
     }
@@ -434,7 +434,7 @@ export class ModelfileGenerator {
   }
 
   private extractBillions(name: string): number {
-    const match = name.match(/(\d+\.?\d*)[bB]/);
+    const match = name.slice(0, 256).match(/([0-9]+(?:\.[0-9]+)?)[bB]/);
     return match ? parseFloat(match[1]) : 7;
   }
 

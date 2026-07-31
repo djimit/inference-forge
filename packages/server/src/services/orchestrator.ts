@@ -3,6 +3,7 @@
  * Manages concurrent model instances, agent workflows, routing, and resource allocation.
  */
 
+import { randomUUID } from 'node:crypto';
 import { ollama, type RunningModel } from './ollama.js';
 
 export class ResourceLimitError extends Error {
@@ -40,7 +41,7 @@ export interface AgentConfig {
 export interface RoutingRule {
   id: string;
   condition: 'keyword' | 'category' | 'length' | 'fallback';
-  pattern?: string;        // regex for keyword, category name, or token threshold
+  pattern?: string;        // literal keyword, category name, or token threshold
   targetAgentId: string;
   priority: number;
 }
@@ -162,7 +163,7 @@ export class OrchestratorService {
     if (!agent) throw new Error(`Agent not found: ${agentId}`);
 
     const session: AgentSession = {
-      id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `session-${randomUUID()}`,
       agentId,
       status: 'idle',
       messages: [
@@ -414,7 +415,7 @@ export class OrchestratorService {
     for (const rule of allRules) {
       switch (rule.condition) {
         case 'keyword':
-          if (rule.pattern && new RegExp(rule.pattern, 'i').test(content)) {
+          if (rule.pattern && content.toLowerCase().includes(rule.pattern.toLowerCase())) {
             return rule.agent;
           }
           break;
@@ -510,7 +511,7 @@ export class OrchestratorService {
           }
           case 'conditional': {
             const condPattern = (step.config.pattern as string) || '';
-            const matches = new RegExp(condPattern, 'i').test(stepInput);
+            const matches = stepInput.toLowerCase().includes(condPattern.toLowerCase());
             currentStepId = matches
               ? (step.config.trueStep as string)
               : (step.config.falseStep as string);

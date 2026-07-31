@@ -202,7 +202,7 @@ export class PerfProfiler {
 
       return profile;
     } catch (err) {
-      console.error(`[PerfProfiler] Ollama profile error for ${modelId}:`, err);
+      console.error('[PerfProfiler] Ollama profile error:', modelId, err);
       return null;
     }
   }
@@ -257,7 +257,7 @@ export class PerfProfiler {
 
       return profile;
     } catch (err) {
-      console.error(`[PerfProfiler] LMS profile error for ${modelId}:`, err);
+      console.error('[PerfProfiler] LMS profile error:', modelId, err);
       return null;
     }
   }
