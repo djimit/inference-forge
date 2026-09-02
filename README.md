@@ -5,6 +5,8 @@ All-in-one desktop management suite for local LLM inference — real-time monito
 ![Inference Forge Dashboard](docs/screenshots/dashboard-preview.png)
 <!-- TODO: Replace with actual screenshot after first launch -->
 
+> **Architectural remediation program in progress.** See [`openspec/changes/README.md`](openspec/changes/README.md) for four sequenced change proposals (backend abstraction, perplexity rigor, auth layer, Modelfile Studio gate) that must land before v0.4/v0.5 roadmap items proceed. The roadmap entries below are annotated with their blocking dependencies.
+
 ## Features
 
 - **Real-time Dashboard** — VRAM usage, model status, KV cache pressure, time-series metrics via WebSocket
@@ -75,18 +77,21 @@ TypeScript, Node.js, Express, WebSocket, React 18, Vite, TailwindCSS, Recharts
 - Alert thresholds for VRAM pressure and model eviction
 
 ### v0.3 — Advanced Benchmarking
-- Perplexity estimation via log-likelihood comparison across KV cache types
+- Perplexity via log-likelihood comparison across KV cache types  
+  > **Note (proposal 02):** the current `POST /api/perplexity/*` returns a *latency-derived* number, not true perplexity. It is being replaced by a real WikiText-2 NLL measurement; see `openspec/changes/02-perplexity-benchmark-rigor/`. Treat current perplexity output as non-authoritative.
 - Custom prompt sets and configurable run parameters
 - Export benchmark reports to PDF and JSON
 - Side-by-side model comparison charts
 
-### v0.4 — Modelfile Studio
+### v0.4 — Modelfile Studio — ⛔ Blocked on #01, #02, #03
+> **Gate (proposal 04):** implementation SHALL NOT proceed until proposals 01 (backend abstraction), 02 (benchmark rigor), and 03 (auth layer) are merged. Modelfile Studio is a write-capable, Ollama-specific feature; building it before the foundation lands means re-designing it once a second backend is added and shipping an unauthenticated config-tampering surface. Already-scaffolded routes (`/modelfile/generate`, `/modelfile/generate-auto`, `/templates/:id/create`) are write-capable and MUST NOT be exposed beyond loopback until proposal 03 lands.
 - Visual Modelfile editor with live preview
 - Import/export Modelfile library
 - Community template gallery
 - One-click model creation via API
 
-### v0.5 — Multi-Agent Support
+### v0.5 — Multi-Agent Support — ⛔ Blocked on #01, #02, #03
+> **Gate (proposal 04):** already partially scaffolded (`services/orchestrator.ts`, `/agents`, `/sessions`, `/workflows` routes). No further scope until proposals 01–03 are merged. Orchestrating multiple models across multiple backends without a stable backend contract multiplies an already-straining foundation's surface.
 - Concurrent model orchestration dashboard
 - Agent workflow builder with model routing
 - Session and conversation memory management
@@ -95,9 +100,9 @@ TypeScript, Node.js, Express, WebSocket, React 18, Vite, TailwindCSS, Recharts
 ### Future
 - Advanced KV cache compression techniques (e.g. PolarQuant-style quantization) when available in llama.cpp
 - Electron desktop app packaging
-- Remote instance management
+- Remote instance management — requires the auth layer from proposal 03; a non-loopback deployment without auth is an unaddressed security gap, not a roadmap feature
 - Plugin system for custom metrics and tools
-- Additional inference backend support (vLLM, llama.cpp server)
+- Additional inference backend support (vLLM, llama.cpp server) — enabled by the port/adapter seam from proposal 01; a real second/third adapter is a follow-up change once the seam lands
 
 ## Contributing
 
