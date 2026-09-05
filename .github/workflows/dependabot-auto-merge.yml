@@ -15,6 +15,9 @@ jobs:
         uses: dependabot/fetch-metadata@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Dependabot's commit-signature verification regressed GitHub-wide
+          # (2026-09): fetch-metadata refuses to run without this flag.
+          skip-verification: true
 
       - name: Auto-merge patch updates
         if: steps.meta.outputs.update-type == 'version-update:semver-patch'
