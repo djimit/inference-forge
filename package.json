@@ -2,7 +2,7 @@
   "name": "inference-forge",
   "version": "0.5.0",
   "private": true,
-  "description": "All-in-one local LLM inference management suite \u2014 monitoring, benchmarking, and Modelfile generation",
+  "description": "All-in-one local LLM inference management suite — monitoring, benchmarking, and Modelfile generation",
   "workspaces": [
     "packages/server",
     "packages/dashboard"
@@ -22,13 +22,14 @@
     "concurrently": "^10.0.5",
     "supertest": "^7.3.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.3"
   },
   "overrides": {
+    "body-parser": "^2.4.0",
     "esbuild": "^0.28.1",
     "nanoid": "^3.3.18",
     "proxy-addr": "^2.0.8",
-    "qs": "^6.16.0",
+    "qs": "^6.17.1",
     "shell-quote": "^1.11.0",
     "source-map-js": "^1.2.2",
     "vite": "^8.2.2",
